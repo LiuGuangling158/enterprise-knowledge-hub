@@ -10,6 +10,7 @@ from services.document_service import DocumentService
 
 class KnowledgeOrchestrator:
     def __init__(self, document_service: DocumentService) -> None:
+        self.document_service = document_service
         retriever = HybridRetriever(document_service)
         self.router = RouterAgent()
         self.retrieval = RetrievalAgent(retriever)
@@ -42,10 +43,26 @@ class KnowledgeOrchestrator:
             yield {"event": "answer_delta", "data": {"text": char}}
             await asyncio.sleep(0.005)
 
+        save_meta = {
+            "trace_id": trace_id,
+            "confidence": qa_result["confidence"],
+            "citations": qa_result["citations"],
+            "rewritten_query": result["rewritten_query"],
+            "hit_count": len(result["results"]),
+        }
+        self.document_service.save_qa_exchange(
+            session_id=session_id,
+            question=question,
+            answer=qa_result["answer"],
+            scope=scope,
+            meta=save_meta,
+        )
+        yield {"event": "conversation_saved", "data": {"session_id": session_id}}
         yield {
             "event": "agent_complete",
             "data": {
                 "trace_id": trace_id,
+                "session_id": session_id,
                 "confidence": qa_result["confidence"],
                 "citations": qa_result["citations"],
             },

@@ -1,5 +1,6 @@
 import type {
   ApprovalItem,
+  ConversationSession,
   DocumentComment,
   DocumentVersion,
   KnowledgeDocument,
@@ -8,7 +9,7 @@ import type {
   UserProfile
 } from "../types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 const TOKEN_KEY = "knowledge_platform_token";
 
 let accessToken = localStorage.getItem(TOKEN_KEY);
@@ -114,8 +115,11 @@ export const api = {
       body: JSON.stringify({ action, reason })
     }),
   metrics: () => request<MetricSnapshot>("/api/metrics"),
+  conversations: () => request<ConversationSession[]>("/api/conversations"),
+  conversation: (sessionId: string) => request<ConversationSession>(`/api/conversations/${sessionId}`),
   search: (query: string) => request<{ results: SearchHit[] }>(`/api/search?q=${encodeURIComponent(query)}`),
   ask: async (
+    sessionId: string,
     question: string,
     onDelta: (text: string) => void,
     onMeta: (payload: Record<string, unknown>) => void
@@ -126,7 +130,7 @@ export const api = {
         "Content-Type": "application/json",
         ...authHeaders()
       },
-      body: JSON.stringify({ question, session_id: "frontend-session" })
+      body: JSON.stringify({ question, session_id: sessionId })
     });
 
     if (!response.ok || !response.body) {

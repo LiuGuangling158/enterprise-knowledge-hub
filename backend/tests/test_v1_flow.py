@@ -217,6 +217,31 @@ class V1FlowTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422, response.text)
 
+    def test_qa_conversation_history_is_persisted_per_user(self) -> None:
+        headers = self.login("product@example.com")
+        session_id = f"qa-test-{uuid4().hex[:8]}"
+        question = "知识库检索架构如何携带引用来源？"
+
+        response = self.client.post(
+            "/api/ask",
+            headers=headers,
+            json={"question": question, "session_id": session_id},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("conversation_saved", response.text)
+
+        conversation = self.client.get(f"/api/conversations/{session_id}", headers=headers)
+        self.assertEqual(conversation.status_code, 200, conversation.text)
+        messages = conversation.json()["messages"]
+        self.assertEqual([message["role"] for message in messages], ["user", "assistant"])
+        self.assertEqual(messages[0]["content"], question)
+        self.assertTrue(messages[1]["content"])
+        self.assertIn("trace_id", messages[1]["meta"])
+
+        other_user_headers = self.login("tech@example.com")
+        blocked = self.client.get(f"/api/conversations/{session_id}", headers=other_user_headers)
+        self.assertEqual(blocked.status_code, 404, blocked.text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -194,7 +194,7 @@ export default function App() {
           onRestore={(id) => api.restoreDocument(id).then(() => refreshData())}
         />
       )}
-      <KnowledgePanel open={panelOpen} onClose={() => setPanelOpen(false)} />
+      <KnowledgePanel open={panelOpen} onClose={() => setPanelOpen(false)} userId={user.id} />
     </Layout>
   );
 }

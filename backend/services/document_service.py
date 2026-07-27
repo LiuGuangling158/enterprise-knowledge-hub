@@ -9,7 +9,16 @@ from sqlalchemy.orm import joinedload
 
 from core.config import settings
 from core.security import hash_password, verify_password
-from database.models import Approval, Department, Document, DocumentComment, DocumentVersion, User
+from database.models import (
+    Approval,
+    ConversationMessage,
+    ConversationSession,
+    Department,
+    Document,
+    DocumentComment,
+    DocumentVersion,
+    User,
+)
 from database.session import SessionLocal
 
 
@@ -319,6 +328,67 @@ class DocumentService:
     def all_visible_text(self, scope: dict[str, str]) -> list[dict]:
         return self.list_documents(scope)
 
+    def list_conversations(self, scope: dict[str, str]) -> list[dict]:
+        with SessionLocal() as db:
+            rows = db.scalars(
+                select(ConversationSession)
+                .where(
+                    ConversationSession.tenant_id == scope["tenant_id"],
+                    ConversationSession.user_id == scope["user_id"],
+                )
+                .order_by(ConversationSession.updated_at.desc())
+            ).all()
+            return [self._conversation_to_dict(row) for row in rows]
+
+    def get_conversation(self, session_id: str, scope: dict[str, str]) -> dict:
+        with SessionLocal() as db:
+            session = self._get_owned_conversation(db, session_id, scope)
+            messages = db.scalars(
+                select(ConversationMessage)
+                .where(ConversationMessage.session_id == session.id)
+                .order_by(ConversationMessage.created_at.asc())
+            ).all()
+            result = self._conversation_to_dict(session)
+            result["messages"] = [self._message_to_dict(message) for message in messages]
+            return result
+
+    def save_qa_exchange(
+        self,
+        session_id: str,
+        question: str,
+        answer: str,
+        scope: dict[str, str],
+        meta: dict | None = None,
+    ) -> dict:
+        with SessionLocal() as db:
+            session = self._ensure_conversation(db, session_id, question, scope)
+            user_created_at = datetime.now(timezone.utc)
+            assistant_created_at = user_created_at + timedelta(microseconds=1)
+            session.updated_at = assistant_created_at
+            db.add(
+                ConversationMessage(
+                    id=self._new_id("msg"),
+                    session_id=session.id,
+                    role="user",
+                    content=question,
+                    meta_json="{}",
+                    created_at=user_created_at,
+                )
+            )
+            db.add(
+                ConversationMessage(
+                    id=self._new_id("msg"),
+                    session_id=session.id,
+                    role="assistant",
+                    content=answer,
+                    meta_json=json.dumps(meta or {}, ensure_ascii=False),
+                    created_at=assistant_created_at,
+                )
+            )
+            db.commit()
+            db.refresh(session)
+            return self._conversation_to_dict(session)
+
     def _visible_documents_statement(self, scope: dict[str, str]):
         statement = (
             select(Document)
@@ -341,6 +411,29 @@ class DocumentService:
         if not doc:
             raise HTTPException(status_code=404, detail="文档不存在或无权访问")
         return doc
+
+    def _get_owned_conversation(self, db, session_id: str, scope: dict[str, str]) -> ConversationSession:
+        session = db.get(ConversationSession, session_id)
+        if not session or session.tenant_id != scope["tenant_id"] or session.user_id != scope["user_id"]:
+            raise HTTPException(status_code=404, detail="会话不存在或无权访问")
+        return session
+
+    def _ensure_conversation(self, db, session_id: str, question: str, scope: dict[str, str]) -> ConversationSession:
+        session = db.get(ConversationSession, session_id)
+        if session:
+            if session.tenant_id != scope["tenant_id"] or session.user_id != scope["user_id"]:
+                raise HTTPException(status_code=403, detail="无权写入该会话")
+            return session
+
+        title = question.strip().replace("\n", " ")[:80] or "新的知识问答"
+        session = ConversationSession(
+            id=session_id,
+            tenant_id=scope["tenant_id"],
+            user_id=scope["user_id"],
+            title=title,
+        )
+        db.add(session)
+        return session
 
     def _assert_can_edit(self, doc: Document, scope: dict[str, str]) -> None:
         if scope["role"] == "admin":
@@ -423,6 +516,26 @@ class DocumentService:
             "author_id": comment.author_id,
             "content": comment.content,
             "created_at": comment.created_at.isoformat(),
+        }
+
+    def _conversation_to_dict(self, session: ConversationSession) -> dict:
+        return {
+            "id": session.id,
+            "tenant_id": session.tenant_id,
+            "user_id": session.user_id,
+            "title": session.title,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+        }
+
+    def _message_to_dict(self, message: ConversationMessage) -> dict:
+        return {
+            "id": message.id,
+            "session_id": message.session_id,
+            "role": message.role,
+            "content": message.content,
+            "meta": json.loads(message.meta_json or "{}"),
+            "created_at": message.created_at.isoformat(),
         }
 
     def _user_to_dict(self, user: User) -> dict:

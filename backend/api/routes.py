@@ -9,6 +9,7 @@ from core.security import create_access_token
 from models.schemas import (
     AskRequest,
     CommentCreate,
+    ConversationSessionOut,
     DocumentCreate,
     DocumentUpdate,
     LoginRequest,
@@ -121,6 +122,16 @@ async def review_approval(approval_id: str, payload: ReviewRequest, user: Curren
 @router.get("/metrics")
 async def metrics(user: CurrentUser) -> dict:
     return documents.metrics(user)
+
+
+@router.get("/conversations", response_model=list[ConversationSessionOut])
+async def list_conversations(user: CurrentUser) -> list[dict]:
+    return documents.list_conversations(user)
+
+
+@router.get("/conversations/{session_id}", response_model=ConversationSessionOut)
+async def get_conversation(session_id: str, user: CurrentUser) -> dict:
+    return documents.get_conversation(session_id, user)
 
 
 @router.get("/search", response_model=SearchResponse)

@@ -63,7 +63,26 @@ class CommentCreate(BaseModel):
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
-    session_id: str = "demo-session"
+    session_id: str = Field(default="demo-session", min_length=1, max_length=64)
+
+
+class ConversationMessageOut(BaseModel):
+    id: str
+    session_id: str
+    role: str
+    content: str
+    meta: dict
+    created_at: str
+
+
+class ConversationSessionOut(BaseModel):
+    id: str
+    tenant_id: str
+    user_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    messages: list[ConversationMessageOut] = Field(default_factory=list)
 
 
 class SearchHit(BaseModel):

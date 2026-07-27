@@ -62,6 +62,25 @@ export interface DocumentComment {
   created_at: string;
 }
 
+export interface ConversationMessage {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant";
+  content: string;
+  meta: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ConversationSession {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages: ConversationMessage[];
+}
+
 export interface MetricSnapshot {
   document_total: number;
   weekly_new: number;
