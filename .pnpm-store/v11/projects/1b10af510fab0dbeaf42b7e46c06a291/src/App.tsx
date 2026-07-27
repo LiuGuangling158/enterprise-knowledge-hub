@@ -23,6 +23,7 @@ export default function App() {
   const [view, setView] = useState<ViewKey>("dashboard");
   const [user, setUser] = useState<UserProfile | null>(null);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
+  const [archivedDocuments, setArchivedDocuments] = useState<KnowledgeDocument[]>([]);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [metrics, setMetrics] = useState<MetricSnapshot>(emptyMetrics);
   const [query, setQuery] = useState("");
@@ -47,8 +48,14 @@ export default function App() {
   }, []);
 
   async function refreshData() {
-    const [docRows, approvalRows, metricSnapshot] = await Promise.all([api.documents(), api.approvals(), api.metrics()]);
+    const [docRows, archivedRows, approvalRows, metricSnapshot] = await Promise.all([
+      api.documents(),
+      api.documents("archived"),
+      api.approvals(),
+      api.metrics()
+    ]);
     setDocuments(docRows);
+    setArchivedDocuments(archivedRows);
     setApprovals(approvalRows);
     setMetrics(metricSnapshot);
   }
@@ -71,6 +78,7 @@ export default function App() {
     api.clearToken();
     setUser(null);
     setDocuments([]);
+    setArchivedDocuments([]);
     setApprovals([]);
     setMetrics(emptyMetrics);
     setView("dashboard");
@@ -82,6 +90,13 @@ export default function App() {
       return text.toLowerCase().includes(query.toLowerCase());
     });
   }, [documents, query]);
+
+  const filteredArchivedDocuments = useMemo(() => {
+    return archivedDocuments.filter((document) => {
+      const text = `${document.title} ${document.author} ${document.tags.join(" ")} ${document.content}`;
+      return text.toLowerCase().includes(query.toLowerCase());
+    });
+  }, [archivedDocuments, query]);
 
   if (booting) {
     return <div className="bootScreen">正在恢复登录状态...</div>;
@@ -116,6 +131,7 @@ export default function App() {
       {view === "documents" && (
         <DocumentLibrary
           documents={filteredDocuments}
+          archivedDocuments={filteredArchivedDocuments}
           onCreate={() => {
             setSelectedDocumentId(null);
             setView("editor");
@@ -124,6 +140,8 @@ export default function App() {
             setSelectedDocumentId(id);
             setView("editor");
           }}
+          onArchive={(id) => api.archiveDocument(id).then(() => refreshData())}
+          onRestore={(id) => api.restoreDocument(id).then(() => refreshData())}
         />
       )}
       {view === "editor" && (
@@ -131,6 +149,14 @@ export default function App() {
           documentId={selectedDocumentId}
           onBack={() => setView("documents")}
           onSaved={(document) => {
+            setSelectedDocumentId(document.id);
+            refreshData();
+          }}
+          onArchived={(document) => {
+            setSelectedDocumentId(document.id);
+            refreshData();
+          }}
+          onRestored={(document) => {
             setSelectedDocumentId(document.id);
             refreshData();
           }}
@@ -155,6 +181,7 @@ export default function App() {
       {view === "admin" && (
         <DocumentLibrary
           documents={filteredDocuments}
+          archivedDocuments={filteredArchivedDocuments}
           onCreate={() => {
             setSelectedDocumentId(null);
             setView("editor");
@@ -163,6 +190,8 @@ export default function App() {
             setSelectedDocumentId(id);
             setView("editor");
           }}
+          onArchive={(id) => api.archiveDocument(id).then(() => refreshData())}
+          onRestore={(id) => api.restoreDocument(id).then(() => refreshData())}
         />
       )}
       <KnowledgePanel open={panelOpen} onClose={() => setPanelOpen(false)} />

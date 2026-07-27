@@ -59,7 +59,8 @@ export const api = {
     return result.user;
   },
   me: () => request<UserProfile>("/api/auth/me"),
-  documents: () => request<KnowledgeDocument[]>("/api/documents"),
+  documents: (status?: string) =>
+    request<KnowledgeDocument[]>(`/api/documents${status ? `?status=${encodeURIComponent(status)}` : ""}`),
   document: (id: string) => request<KnowledgeDocument>(`/api/documents/${id}`),
   createDocument: (payload: {
     title: string;
@@ -84,6 +85,14 @@ export const api = {
     request<KnowledgeDocument>(`/api/documents/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload)
+    }),
+  archiveDocument: (id: string) =>
+    request<KnowledgeDocument>(`/api/documents/${id}/archive`, {
+      method: "POST"
+    }),
+  restoreDocument: (id: string) =>
+    request<KnowledgeDocument>(`/api/documents/${id}/restore`, {
+      method: "POST"
     }),
   submitDocument: (id: string, summary: string) =>
     request<ApprovalItem>(`/api/documents/${id}/submit`, {

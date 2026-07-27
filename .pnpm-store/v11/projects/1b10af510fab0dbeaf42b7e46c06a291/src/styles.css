@@ -359,7 +359,8 @@ button {
 }
 
 .status.draft,
-.status.rejected {
+.status.rejected,
+.status.archived {
   background: #f2f4f7;
   color: #475467;
 }
@@ -493,6 +494,17 @@ button {
   justify-items: end;
   gap: 8px;
   min-width: 86px;
+}
+
+.recordActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.recordActions button {
+  min-width: 72px;
 }
 
 .noticeLine {

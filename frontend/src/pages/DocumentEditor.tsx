@@ -1,4 +1,4 @@
-import { ArrowLeft, Eye, FileUp, MessageSquarePlus, Save, Send, SquarePen } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, Eye, FileUp, MessageSquarePlus, Save, Send, SquarePen } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../services/api";
 import type { ApprovalItem, DocumentComment, DocumentVersion, KnowledgeDocument } from "../types";
@@ -7,10 +7,12 @@ interface EditorProps {
   documentId: string | null;
   onBack: () => void;
   onSaved: (document: KnowledgeDocument) => void;
+  onArchived: (document: KnowledgeDocument) => void;
+  onRestored: (document: KnowledgeDocument) => void;
   onSubmitted: () => void;
 }
 
-export function DocumentEditor({ documentId, onBack, onSaved, onSubmitted }: EditorProps) {
+export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRestored, onSubmitted }: EditorProps) {
   const [document, setDocument] = useState<KnowledgeDocument | null>(null);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalItem[]>([]);
@@ -69,6 +71,11 @@ export function DocumentEditor({ documentId, onBack, onSaved, onSubmitted }: Edi
   );
 
   async function save() {
+    if (document?.status === "archived") {
+      setMessage("已归档文档需要恢复后再编辑");
+      return;
+    }
+
     setSaving(true);
     setMessage("");
     try {
@@ -93,6 +100,11 @@ export function DocumentEditor({ documentId, onBack, onSaved, onSubmitted }: Edi
   }
 
   async function submitForReview() {
+    if (document?.status === "archived") {
+      setMessage("已归档文档需要恢复后再提交审批");
+      return;
+    }
+
     setSaving(true);
     setMessage("");
     try {
@@ -107,6 +119,43 @@ export function DocumentEditor({ documentId, onBack, onSaved, onSubmitted }: Edi
       onSubmitted();
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "提交审批失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function archiveCurrentDocument() {
+    if (!document) {
+      setMessage("请先保存文档再归档");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+    try {
+      const archived = await api.archiveDocument(document.id);
+      setDocument(archived);
+      setMessage("文档已归档");
+      onArchived(archived);
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "归档失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function restoreCurrentDocument() {
+    if (!document) return;
+
+    setSaving(true);
+    setMessage("");
+    try {
+      const restored = await api.restoreDocument(document.id);
+      setDocument(restored);
+      setMessage("文档已恢复为草稿");
+      onRestored(restored);
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "恢复失败");
     } finally {
       setSaving(false);
     }
@@ -173,10 +222,29 @@ export function DocumentEditor({ documentId, onBack, onSaved, onSubmitted }: Edi
             <Save size={16} />
             <span>保存</span>
           </button>
-          <button className="primaryAction" onClick={submitForReview} disabled={!title || !content || document?.status === "reviewing"}>
+          <button
+            className="primaryAction"
+            onClick={submitForReview}
+            disabled={!title || !content || document?.status === "reviewing" || document?.status === "archived"}
+          >
             <Send size={16} />
             <span>提交审批</span>
           </button>
+          {document?.status === "archived" ? (
+            <button className="secondaryAction" onClick={restoreCurrentDocument} disabled={saving}>
+              <ArchiveRestore size={16} />
+              <span>恢复</span>
+            </button>
+          ) : (
+            <button
+              className="dangerAction"
+              onClick={archiveCurrentDocument}
+              disabled={!document || saving || document?.status === "reviewing"}
+            >
+              <Archive size={16} />
+              <span>归档</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -296,7 +364,8 @@ function statusText(status: KnowledgeDocument["status"]) {
     draft: "草稿",
     reviewing: "审核中",
     published: "已发布",
-    rejected: "已驳回"
+    rejected: "已驳回",
+    archived: "已归档"
   }[status];
 }
 

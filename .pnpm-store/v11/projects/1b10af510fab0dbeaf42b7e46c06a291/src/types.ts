@@ -1,6 +1,6 @@
 export type ViewKey = "dashboard" | "documents" | "approvals" | "qa" | "analytics" | "admin" | "editor";
 
-export type DocumentStatus = "draft" | "reviewing" | "published" | "rejected";
+export type DocumentStatus = "draft" | "reviewing" | "published" | "rejected" | "archived";
 
 export interface UserProfile {
   id: string;

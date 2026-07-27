@@ -123,6 +123,59 @@ class V1FlowTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403, response.text)
 
+    def test_archive_hides_document_until_restored(self) -> None:
+        headers = self.login("admin@example.com")
+        suffix = uuid4().hex[:8]
+        created = self.client.post(
+            "/api/documents",
+            headers=headers,
+            json={
+                "title": f"Archive flow doc {suffix}",
+                "content": "Archive content",
+                "tags": ["archive"],
+                "visibility": "public",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        document_id = created.json()["id"]
+
+        archived = self.client.post(f"/api/documents/{document_id}/archive", headers=headers)
+        self.assertEqual(archived.status_code, 200, archived.text)
+        self.assertEqual(archived.json()["status"], "archived")
+
+        default_documents = self.client.get("/api/documents", headers=headers)
+        self.assertEqual(default_documents.status_code, 200, default_documents.text)
+        self.assertNotIn(document_id, [item["id"] for item in default_documents.json()])
+
+        archived_documents = self.client.get("/api/documents?status=archived", headers=headers)
+        self.assertEqual(archived_documents.status_code, 200, archived_documents.text)
+        self.assertIn(document_id, [item["id"] for item in archived_documents.json()])
+
+        edit_archived = self.client.put(
+            f"/api/documents/{document_id}",
+            headers=headers,
+            json={
+                "title": "Should not edit archived",
+                "content": "Blocked",
+                "tags": ["archive"],
+                "visibility": "public",
+            },
+        )
+        self.assertEqual(edit_archived.status_code, 409, edit_archived.text)
+
+        restored = self.client.post(f"/api/documents/{document_id}/restore", headers=headers)
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["status"], "draft")
+
+        restored_documents = self.client.get("/api/documents", headers=headers)
+        self.assertEqual(restored_documents.status_code, 200, restored_documents.text)
+        self.assertIn(document_id, [item["id"] for item in restored_documents.json()])
+
+    def test_non_author_cannot_archive_visible_document(self) -> None:
+        headers = self.login("product@example.com")
+        response = self.client.post("/api/documents/doc-002/archive", headers=headers)
+        self.assertEqual(response.status_code, 403, response.text)
+
     def test_invalid_visibility_is_rejected(self) -> None:
         headers = self.login("admin@example.com")
         response = self.client.post(

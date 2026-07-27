@@ -54,6 +54,8 @@ class DocumentService:
             statement = self._visible_documents_statement(scope)
             if status:
                 statement = statement.where(Document.status == status)
+            else:
+                statement = statement.where(Document.status != "archived")
             statement = statement.order_by(Document.updated_at.desc())
             rows = db.scalars(statement).all()
             documents = [self._document_to_dict(row) for row in rows]
@@ -97,6 +99,8 @@ class DocumentService:
             self._assert_can_edit(doc, scope)
             if doc.status == "reviewing":
                 raise HTTPException(status_code=409, detail="审核中的文档不可编辑")
+            if doc.status == "archived":
+                raise HTTPException(status_code=409, detail="已归档的文档需要恢复后再编辑")
 
             changed = False
             for field in ["title", "content", "visibility"]:
@@ -122,10 +126,38 @@ class DocumentService:
             db.refresh(doc)
             return self._document_to_dict(doc)
 
+    def archive_document(self, document_id: str, scope: dict[str, str]) -> dict:
+        with SessionLocal() as db:
+            doc = self._get_visible_document(db, document_id, scope)
+            self._assert_can_edit(doc, scope)
+            if doc.status == "reviewing":
+                raise HTTPException(status_code=409, detail="审核中的文档不可归档")
+
+            doc.status = "archived"
+            doc.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(doc)
+            return self._document_to_dict(doc)
+
+    def restore_document(self, document_id: str, scope: dict[str, str]) -> dict:
+        with SessionLocal() as db:
+            doc = self._get_visible_document(db, document_id, scope)
+            self._assert_can_edit(doc, scope)
+            if doc.status != "archived":
+                return self._document_to_dict(doc)
+
+            doc.status = "draft"
+            doc.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(doc)
+            return self._document_to_dict(doc)
+
     def submit_document(self, document_id: str, payload, scope: dict[str, str]) -> dict:
         with SessionLocal() as db:
             doc = self._get_visible_document(db, document_id, scope)
             self._assert_can_edit(doc, scope)
+            if doc.status == "archived":
+                raise HTTPException(status_code=409, detail="已归档的文档不可提交审批")
             existing = db.scalar(
                 select(Approval).where(Approval.document_id == document_id, Approval.status == "pending")
             )
@@ -148,7 +180,12 @@ class DocumentService:
 
     def list_approvals(self, scope: dict[str, str]) -> list[dict]:
         with SessionLocal() as db:
-            visible_ids = [doc.id for doc in db.scalars(self._visible_documents_statement(scope)).all()]
+            visible_ids = [
+                doc.id
+                for doc in db.scalars(
+                    self._visible_documents_statement(scope).where(Document.status != "archived")
+                ).all()
+            ]
             if not visible_ids:
                 return []
             rows = db.scalars(

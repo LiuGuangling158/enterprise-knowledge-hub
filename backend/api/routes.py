@@ -73,6 +73,16 @@ async def update_document(document_id: str, payload: DocumentUpdate, user: Curre
     return documents.update_document(document_id, payload, user)
 
 
+@router.post("/documents/{document_id}/archive")
+async def archive_document(document_id: str, user: CurrentUser) -> dict:
+    return documents.archive_document(document_id, user)
+
+
+@router.post("/documents/{document_id}/restore")
+async def restore_document(document_id: str, user: CurrentUser) -> dict:
+    return documents.restore_document(document_id, user)
+
+
 @router.post("/documents/{document_id}/submit")
 async def submit_document(document_id: str, payload: SubmitRequest, user: CurrentUser) -> dict:
     return documents.submit_document(document_id, payload, user)
