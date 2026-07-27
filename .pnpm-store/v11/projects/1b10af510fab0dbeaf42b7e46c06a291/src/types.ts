@@ -94,6 +94,24 @@ export interface ConversationSession {
   messages: ConversationMessage[];
 }
 
+export interface AgentCapability {
+  id: string;
+  name: string;
+  responsibility: string;
+  tools: string[];
+}
+
+export interface AgentTool {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface AgentCapabilities {
+  agents: AgentCapability[];
+  tools: AgentTool[];
+}
+
 export interface MetricSnapshot {
   document_total: number;
   weekly_new: number;

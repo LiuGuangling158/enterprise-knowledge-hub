@@ -1,4 +1,5 @@
 import type {
+  AgentCapabilities,
   ApprovalItem,
   ConversationSession,
   DocumentComment,
@@ -120,6 +121,7 @@ export const api = {
       body: JSON.stringify({ action, reason })
     }),
   metrics: () => request<MetricSnapshot>("/api/metrics"),
+  agentCapabilities: () => request<AgentCapabilities>("/api/agents/capabilities"),
   conversations: () => request<ConversationSession[]>("/api/conversations"),
   conversation: (sessionId: string) => request<ConversationSession>(`/api/conversations/${sessionId}`),
   search: (query: string) => request<{ results: SearchHit[] }>(`/api/search?q=${encodeURIComponent(query)}`),

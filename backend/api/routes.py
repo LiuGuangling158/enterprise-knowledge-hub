@@ -145,6 +145,11 @@ async def get_conversation(session_id: str, user: CurrentUser) -> dict:
     return documents.get_conversation(session_id, user)
 
 
+@router.get("/agents/capabilities")
+async def agent_capabilities(user: CurrentUser) -> dict:
+    return orchestrator.capabilities()
+
+
 @router.get("/search", response_model=SearchResponse)
 async def search(
     user: CurrentUser,
