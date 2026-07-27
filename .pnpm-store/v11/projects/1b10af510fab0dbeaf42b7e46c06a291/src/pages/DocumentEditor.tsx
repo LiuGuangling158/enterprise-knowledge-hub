@@ -1,7 +1,7 @@
 import { Archive, ArchiveRestore, ArrowLeft, Eye, FileUp, MessageSquarePlus, Save, Send, SquarePen } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../services/api";
-import type { ApprovalItem, DocumentComment, DocumentVersion, KnowledgeDocument } from "../types";
+import type { ApprovalItem, DocumentComment, DocumentVersion, KnowledgeDocument, VersionCompareResult } from "../types";
 
 interface EditorProps {
   documentId: string | null;
@@ -15,6 +15,9 @@ interface EditorProps {
 export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRestored, onSubmitted }: EditorProps) {
   const [document, setDocument] = useState<KnowledgeDocument | null>(null);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
+  const [compareLeft, setCompareLeft] = useState(1);
+  const [compareRight, setCompareRight] = useState(1);
+  const [versionCompare, setVersionCompare] = useState<VersionCompareResult | null>(null);
   const [approvalHistory, setApprovalHistory] = useState<ApprovalItem[]>([]);
   const [comments, setComments] = useState<DocumentComment[]>([]);
   const [title, setTitle] = useState("");
@@ -30,6 +33,9 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
   function resetEditorState(nextSummary = "创建文档") {
     setDocument(null);
     setVersions([]);
+    setCompareLeft(1);
+    setCompareRight(1);
+    setVersionCompare(null);
     setApprovalHistory([]);
     setComments([]);
     setTitle("");
@@ -58,6 +64,7 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
       if (cancelled) return;
       setDocument(doc);
       setVersions(versionRows);
+      syncCompareSelection(versionRows, doc.version);
       setApprovalHistory(approvalRows);
       setComments(commentRows);
       setTitle(doc.title);
@@ -86,6 +93,14 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
     [tags]
   );
 
+  function syncCompareSelection(versionRows: DocumentVersion[], fallbackVersion: number) {
+    const latest = versionRows[0]?.version ?? fallbackVersion;
+    const previous = versionRows[1]?.version ?? latest;
+    setCompareLeft(previous);
+    setCompareRight(latest);
+    setVersionCompare(null);
+  }
+
   async function save() {
     if (document?.status === "archived") {
       setMessage("已归档文档需要恢复后再编辑");
@@ -106,6 +121,7 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
         api.comments(saved.id)
       ]);
       setVersions(versionRows);
+      syncCompareSelection(versionRows, saved.version);
       setApprovalHistory(approvalRows);
       setComments(commentRows);
     } catch (reason) {
@@ -172,6 +188,24 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
       onRestored(restored);
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "恢复失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function compareSelectedVersions() {
+    if (!document) {
+      setMessage("请先保存文档再对比版本");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+    try {
+      const result = await api.compareVersions(document.id, compareLeft, compareRight);
+      setVersionCompare(result);
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "版本对比失败");
     } finally {
       setSaving(false);
     }
@@ -312,6 +346,10 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
             <p>阅读：{document?.reads ?? 0}</p>
           </div>
           <div className="sideBlock">
+            <h2>自动摘要</h2>
+            <p>{document?.summary || "保存后自动生成摘要"}</p>
+          </div>
+          <div className="sideBlock">
             <h2>审批记录</h2>
             <div className="timelineList">
               {approvalHistory.map((approval) => (
@@ -372,6 +410,40 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
           </div>
           <div className="sideBlock">
             <h2>版本记录</h2>
+            <div className="compareControls">
+              <label>
+                <span>起始版本</span>
+                <select value={compareLeft} onChange={(event) => setCompareLeft(Number(event.target.value))}>
+                  {versions.map((version) => (
+                    <option value={version.version} key={`left-${version.id}`}>
+                      v{version.version}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>目标版本</span>
+                <select value={compareRight} onChange={(event) => setCompareRight(Number(event.target.value))}>
+                  {versions.map((version) => (
+                    <option value={version.version} key={`right-${version.id}`}>
+                      v{version.version}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button className="secondaryAction" onClick={compareSelectedVersions} disabled={saving || versions.length < 2}>
+                <Eye size={16} />
+                <span>对比</span>
+              </button>
+            </div>
+            {versionCompare ? (
+              <div className="diffBlock">
+                <p>{versionCompare.summary}</p>
+                <pre>{versionCompare.diff.length ? versionCompare.diff.slice(0, 24).join("\n") : "两个版本内容一致"}</pre>
+              </div>
+            ) : versions.length < 2 ? (
+              <p>至少两个版本后可对比差异</p>
+            ) : null}
             <div className="versionList">
               {versions.map((version) => (
                 <article key={version.id}>

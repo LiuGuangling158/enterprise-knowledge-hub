@@ -6,7 +6,8 @@ import type {
   KnowledgeDocument,
   MetricSnapshot,
   SearchHit,
-  UserProfile
+  UserProfile,
+  VersionCompareResult
 } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -101,6 +102,10 @@ export const api = {
       body: JSON.stringify({ summary })
     }),
   versions: (id: string) => request<DocumentVersion[]>(`/api/documents/${id}/versions`),
+  compareVersions: (id: string, left: number, right: number) =>
+    request<VersionCompareResult>(
+      `/api/documents/${id}/versions/compare?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`
+    ),
   documentApprovals: (id: string) => request<ApprovalItem[]>(`/api/documents/${id}/approvals`),
   comments: (id: string) => request<DocumentComment[]>(`/api/documents/${id}/comments`),
   addComment: (id: string, content: string) =>

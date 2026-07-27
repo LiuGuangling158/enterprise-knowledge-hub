@@ -4,8 +4,15 @@ import { api } from "../services/api";
 import type { ConversationMessage } from "../types";
 
 interface Citation {
+  document_id?: string;
   title: string;
   citation: string;
+  section?: string;
+  snippet?: string;
+  version?: number;
+  score?: number;
+  author?: string;
+  department?: string;
 }
 
 interface Message {
@@ -42,7 +49,17 @@ function citationsFromMeta(meta: Record<string, unknown>): Citation[] | undefine
       if (!item || typeof item !== "object") return null;
       const citation = item as Record<string, unknown>;
       if (typeof citation.title !== "string" || typeof citation.citation !== "string") return null;
-      return { title: citation.title, citation: citation.citation };
+      return {
+        document_id: typeof citation.document_id === "string" ? citation.document_id : undefined,
+        title: citation.title,
+        citation: citation.citation,
+        section: typeof citation.section === "string" ? citation.section : undefined,
+        snippet: typeof citation.snippet === "string" ? citation.snippet : undefined,
+        version: typeof citation.version === "number" ? citation.version : undefined,
+        score: typeof citation.score === "number" ? citation.score : undefined,
+        author: typeof citation.author === "string" ? citation.author : undefined,
+        department: typeof citation.department === "string" ? citation.department : undefined
+      };
     })
     .filter(Boolean) as Citation[];
 }
@@ -155,9 +172,12 @@ export function KnowledgePanel({ open, onClose, userId }: { open: boolean; onClo
             {message.citations?.length ? (
               <div className="citations">
                 {message.citations.map((citation) => (
-                  <button key={citation.citation} title={citation.citation}>
+                  <button key={citation.citation} title={citation.snippet || citation.citation}>
                     <FileText size={14} />
-                    <span>{citation.title}</span>
+                    <span>
+                      {citation.title}
+                      {citation.version ? <small>v{citation.version} · {citation.section || "正文"}</small> : null}
+                    </span>
                   </button>
                 ))}
               </div>

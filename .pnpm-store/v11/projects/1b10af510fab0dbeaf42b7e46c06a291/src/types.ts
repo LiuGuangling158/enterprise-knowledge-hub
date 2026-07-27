@@ -26,6 +26,7 @@ export interface KnowledgeDocument {
   status: DocumentStatus;
   visibility: "department" | "public";
   tags: string[];
+  summary: string;
   reads: number;
   content: string;
 }
@@ -51,6 +52,18 @@ export interface DocumentVersion {
   summary: string;
   created_by: string;
   created_at: string;
+}
+
+export interface VersionCompareResult {
+  document_id: string;
+  left_version: number;
+  right_version: number;
+  left_title: string;
+  right_title: string;
+  summary: string;
+  added_lines: number;
+  removed_lines: number;
+  diff: string[];
 }
 
 export interface DocumentComment {
@@ -97,4 +110,9 @@ export interface SearchHit {
   snippet: string;
   score: number;
   citation: string;
+  version: number;
+  author: string;
+  department: string;
+  updated_at: string;
+  source: Record<string, unknown>;
 }

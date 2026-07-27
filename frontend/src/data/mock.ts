@@ -11,6 +11,7 @@ export const fallbackDocuments: KnowledgeDocument[] = [
     visibility: "department",
     department_id: "dept-product",
     tags: ["产品", "流程", "审批"],
+    summary: "产品需求评审流程：需求进入评审前，产品经理需要完成背景、目标、范围、验收标准和风险说明。",
     reads: 186,
     content: "需求进入评审前，产品经理需要完成背景、目标、范围、验收标准和风险说明。"
   },
@@ -24,6 +25,7 @@ export const fallbackDocuments: KnowledgeDocument[] = [
     visibility: "public",
     department_id: "dept-tech",
     tags: ["技术", "RAG", "架构"],
+    summary: "知识库检索架构设计：检索链路采用 Query 改写、语义召回、关键词召回、元数据过滤和 RRF 融合重排序。",
     reads: 142,
     content: "检索链路采用 Query 改写、语义召回、关键词召回、元数据过滤和 RRF 融合重排序。"
   }

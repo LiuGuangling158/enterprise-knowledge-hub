@@ -96,7 +96,7 @@ export function DocumentLibrary({
           <article className="docRecord" key={document.id}>
             <div>
               <strong>{document.title}</strong>
-              <p>{document.content}</p>
+              <p>{document.summary || document.content}</p>
               <div className="tagList">
                 {document.tags.map((tag) => (
                   <span key={tag}>{tag}</span>
