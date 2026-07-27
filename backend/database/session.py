@@ -19,6 +19,7 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     ensure_runtime_indexes()
+    ensure_runtime_columns()
     with SessionLocal() as db:
         seed_demo_data(db)
 
@@ -35,3 +36,17 @@ def ensure_runtime_indexes() -> None:
             WHERE status = 'pending'
             """
         )
+
+
+def ensure_runtime_columns() -> None:
+    if engine.dialect.name == "sqlite":
+        with engine.begin() as connection:
+            rows = connection.exec_driver_sql("PRAGMA table_info('documents')").mappings().all()
+            columns = {row["name"] for row in rows}
+            if "summary" not in columns:
+                connection.exec_driver_sql("ALTER TABLE documents ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
+        return
+
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''")

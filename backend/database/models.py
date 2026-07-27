@@ -81,6 +81,7 @@ class Document(Base):
     visibility: Mapped[str] = mapped_column(String(40), nullable=False, default="department")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     tags_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     reads: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)

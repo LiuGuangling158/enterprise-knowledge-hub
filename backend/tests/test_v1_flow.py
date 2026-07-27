@@ -57,6 +57,7 @@ class V1FlowTest(unittest.TestCase):
         )
         self.assertEqual(created.status_code, 200, created.text)
         document_id = created.json()["id"]
+        self.assertIn("Initial content", created.json()["summary"])
 
         updated = self.client.put(
             f"/api/documents/{document_id}",
@@ -70,6 +71,18 @@ class V1FlowTest(unittest.TestCase):
             },
         )
         self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertIn("Updated before submit", updated.json()["summary"])
+
+        compared = self.client.get(
+            f"/api/documents/{document_id}/versions/compare",
+            headers=headers,
+            params={"left": 1, "right": 2},
+        )
+        self.assertEqual(compared.status_code, 200, compared.text)
+        self.assertEqual(compared.json()["left_version"], 1)
+        self.assertEqual(compared.json()["right_version"], 2)
+        self.assertIn("-Initial content", compared.json()["diff"])
+        self.assertIn("+Updated before submit", compared.json()["diff"])
 
         comment = self.client.post(
             f"/api/documents/{document_id}/comments",
@@ -237,6 +250,17 @@ class V1FlowTest(unittest.TestCase):
         self.assertEqual(messages[0]["content"], question)
         self.assertTrue(messages[1]["content"])
         self.assertIn("trace_id", messages[1]["meta"])
+        citations = messages[1]["meta"]["citations"]
+        self.assertGreaterEqual(len(citations), 1)
+        self.assertIn("document_id", citations[0])
+        self.assertIn("version", citations[0])
+        self.assertIn("snippet", citations[0])
+        self.assertIn("source", citations[0])
+        self.assertEqual(citations[0]["source"]["citation"], citations[0]["citation"])
+
+        search = self.client.get("/api/search", headers=headers, params={"q": "检索架构"})
+        self.assertEqual(search.status_code, 200, search.text)
+        self.assertIn("source", search.json()["results"][0])
 
         other_user_headers = self.login("tech@example.com")
         blocked = self.client.get(f"/api/conversations/{session_id}", headers=other_user_headers)

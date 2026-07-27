@@ -15,6 +15,21 @@ class QAAgent:
 
         facts = [hit["snippet"] for hit in hits[:3]]
         answer = "根据已发布或可访问的内部文档，" + "；".join(facts)
-        citations = [{"title": hit["title"], "citation": hit["citation"]} for hit in hits[:3]]
+        citations = [
+            {
+                "document_id": hit["document_id"],
+                "title": hit["title"],
+                "citation": hit["citation"],
+                "section": hit["section"],
+                "snippet": hit["snippet"],
+                "score": hit["score"],
+                "version": hit["version"],
+                "author": hit["author"],
+                "department": hit["department"],
+                "updated_at": hit["updated_at"],
+                "source": hit["source"],
+            }
+            for hit in hits[:3]
+        ]
         confidence = self.guard.confidence(answer, hits)
         return {"answer": answer, "citations": citations, "confidence": confidence}

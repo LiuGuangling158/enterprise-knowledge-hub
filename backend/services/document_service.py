@@ -1,4 +1,5 @@
 import json
+from difflib import unified_diff
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -90,6 +91,7 @@ class DocumentService:
                 department_id=department_id,
                 title=payload.title,
                 content=payload.content,
+                summary=self._summarize_document(payload.title, payload.content),
                 author_id=scope["user_id"],
                 status="draft",
                 visibility=payload.visibility,
@@ -113,11 +115,14 @@ class DocumentService:
                 raise HTTPException(status_code=409, detail="已归档的文档需要恢复后再编辑")
 
             changed = False
+            regenerate_summary = False
             for field in ["title", "content", "visibility"]:
                 value = getattr(payload, field)
                 if value is not None and getattr(doc, field) != value:
                     setattr(doc, field, value)
                     changed = True
+                    if field in {"title", "content"}:
+                        regenerate_summary = True
             if payload.department_id is not None:
                 department_id = self._resolve_department_id(db, payload.department_id, scope)
                 if doc.department_id != department_id:
@@ -128,6 +133,8 @@ class DocumentService:
                 changed = True
 
             if changed:
+                if regenerate_summary or not doc.summary:
+                    doc.summary = self._summarize_document(doc.title, doc.content)
                 doc.version += 1
                 doc.status = "draft"
                 doc.updated_at = datetime.now(timezone.utc)
@@ -259,6 +266,44 @@ class DocumentService:
                 .order_by(DocumentVersion.version.desc(), DocumentVersion.created_at.desc())
             ).all()
             return [self._version_to_dict(row) for row in rows]
+
+    def compare_versions(self, document_id: str, left: int, right: int, scope: dict[str, str]) -> dict:
+        with SessionLocal() as db:
+            self._get_visible_document(db, document_id, scope)
+            rows = db.scalars(
+                select(DocumentVersion).where(
+                    DocumentVersion.document_id == document_id,
+                    DocumentVersion.version.in_([left, right]),
+                )
+            ).all()
+            by_version = {row.version: row for row in rows}
+            if left not in by_version or right not in by_version:
+                raise HTTPException(status_code=404, detail="版本不存在或无权访问")
+
+            left_row = by_version[left]
+            right_row = by_version[right]
+            diff_lines = list(
+                unified_diff(
+                    left_row.content.splitlines(),
+                    right_row.content.splitlines(),
+                    fromfile=f"v{left}",
+                    tofile=f"v{right}",
+                    lineterm="",
+                )
+            )
+            added_lines = len([line for line in diff_lines if line.startswith("+") and not line.startswith("+++")])
+            removed_lines = len([line for line in diff_lines if line.startswith("-") and not line.startswith("---")])
+            return {
+                "document_id": document_id,
+                "left_version": left,
+                "right_version": right,
+                "left_title": left_row.title,
+                "right_title": right_row.title,
+                "summary": f"v{left} 到 v{right}：新增 {added_lines} 行，删除 {removed_lines} 行",
+                "added_lines": added_lines,
+                "removed_lines": removed_lines,
+                "diff": diff_lines,
+            }
 
     def list_document_approvals(self, document_id: str, scope: dict[str, str]) -> list[dict]:
         with SessionLocal() as db:
@@ -479,6 +524,7 @@ class DocumentService:
             "status": doc.status,
             "visibility": doc.visibility,
             "tags": json.loads(doc.tags_json or "[]"),
+            "summary": doc.summary or self._summarize_document(doc.title, doc.content),
             "reads": doc.reads,
             "content": doc.content,
         }
@@ -558,3 +604,19 @@ class DocumentService:
         if parsed.tzinfo is None:
             return parsed.replace(tzinfo=timezone.utc)
         return parsed
+
+    def _summarize_document(self, title: str, content: str) -> str:
+        clean = " ".join(content.split())
+        if not clean:
+            return f"{title}：暂无正文摘要"
+
+        excerpt = clean
+        for delimiter in ["。", "！", "？", ".", "!", "?"]:
+            first_sentence = clean.split(delimiter, 1)[0].strip()
+            if 20 <= len(first_sentence) <= 140:
+                excerpt = f"{first_sentence}{delimiter}"
+                break
+
+        if len(excerpt) > 160:
+            excerpt = f"{excerpt[:157].rstrip()}..."
+        return f"{title}：{excerpt}"[:220]

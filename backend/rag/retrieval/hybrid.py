@@ -16,14 +16,32 @@ class HybridRetriever:
             semantic_score = self._semantic_overlap(rewritten, doc["content"])
             score = keyword_score * 0.55 + semantic_score * 0.45 + doc["reads"] / 1000
             if score > 0:
+                section = "正文"
+                snippet = doc["content"][:160]
+                citation = f"{doc['title']} v{doc['version']}#{section}"
                 candidates.append(
                     {
                         "document_id": doc["id"],
                         "title": doc["title"],
-                        "section": "正文",
-                        "snippet": doc["content"][:120],
+                        "section": section,
+                        "snippet": snippet,
                         "score": round(score, 3),
-                        "citation": f"{doc['title']} v{doc['version']}#正文",
+                        "citation": citation,
+                        "version": doc["version"],
+                        "author": doc["author"],
+                        "department": doc["department"],
+                        "updated_at": doc["updated_at"],
+                        "source": {
+                            "document_id": doc["id"],
+                            "title": doc["title"],
+                            "version": doc["version"],
+                            "section": section,
+                            "author": doc["author"],
+                            "department": doc["department"],
+                            "updated_at": doc["updated_at"],
+                            "snippet": snippet,
+                            "citation": citation,
+                        },
                     }
                 )
 

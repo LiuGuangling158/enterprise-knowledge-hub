@@ -92,9 +92,26 @@ class SearchHit(BaseModel):
     snippet: str
     score: float
     citation: str
+    version: int
+    author: str
+    department: str
+    updated_at: str
+    source: dict
 
 
 class SearchResponse(BaseModel):
     query: str
     rewritten_query: str
     results: list[SearchHit]
+
+
+class VersionCompareResponse(BaseModel):
+    document_id: str
+    left_version: int
+    right_version: int
+    left_title: str
+    right_title: str
+    summary: str
+    added_lines: int
+    removed_lines: int
+    diff: list[str]

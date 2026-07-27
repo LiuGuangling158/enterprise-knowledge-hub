@@ -19,6 +19,7 @@ from models.schemas import (
     SubmitRequest,
     TokenResponse,
     UserOut,
+    VersionCompareResponse,
 )
 
 
@@ -87,6 +88,16 @@ async def restore_document(document_id: str, user: CurrentUser) -> dict:
 @router.post("/documents/{document_id}/submit")
 async def submit_document(document_id: str, payload: SubmitRequest, user: CurrentUser) -> dict:
     return documents.submit_document(document_id, payload, user)
+
+
+@router.get("/documents/{document_id}/versions/compare", response_model=VersionCompareResponse)
+async def compare_versions(
+    document_id: str,
+    user: CurrentUser,
+    left: int = Query(..., ge=1),
+    right: int = Query(..., ge=1),
+) -> dict:
+    return documents.compare_versions(document_id, left, right, user)
 
 
 @router.get("/documents/{document_id}/versions")
