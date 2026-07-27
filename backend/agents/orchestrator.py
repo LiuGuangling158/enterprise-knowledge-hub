@@ -150,6 +150,15 @@ class KnowledgeOrchestrator:
                 "objective": "基于证据生成可引用回答",
             },
         )
+        yield event(
+            "tool_call",
+            {
+                "agent": "qa",
+                "agent_name": "QA Agent",
+                "tool": "evidence_guard",
+                "args": {"hit_count": len(result["results"])},
+            },
+        )
         qa_result = self.qa.answer(question, result["results"])
         yield event(
             "guardrail_result",
@@ -181,7 +190,7 @@ class KnowledgeOrchestrator:
             "intent": route["intent"],
             "duration_ms": duration_ms,
             "agent_count": 4,
-            "tool_call_count": 2,
+            "tool_call_count": 3,
             "evidence_count": len(result["results"]),
             "confidence": qa_result["confidence"],
         }
@@ -202,6 +211,15 @@ class KnowledgeOrchestrator:
                 "agent_name": "Memory Agent",
                 "stage": "conversation_memory",
                 "objective": "保存问答历史与执行轨迹",
+            },
+        )
+        yield event(
+            "tool_call",
+            {
+                "agent": "memory",
+                "agent_name": "Memory Agent",
+                "tool": "conversation_store",
+                "args": {"session_id": session_id},
             },
         )
         self.document_service.save_qa_exchange(

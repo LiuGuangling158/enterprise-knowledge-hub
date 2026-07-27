@@ -241,6 +241,9 @@ class V1FlowTest(unittest.TestCase):
             json={"question": question, "session_id": session_id},
         )
         self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("agent_plan", response.text)
+        self.assertIn("tool_result", response.text)
+        self.assertIn("guardrail_result", response.text)
         self.assertIn("conversation_saved", response.text)
 
         conversation = self.client.get(f"/api/conversations/{session_id}", headers=headers)
@@ -250,6 +253,8 @@ class V1FlowTest(unittest.TestCase):
         self.assertEqual(messages[0]["content"], question)
         self.assertTrue(messages[1]["content"])
         self.assertIn("trace_id", messages[1]["meta"])
+        self.assertIn("agent_trace", messages[1]["meta"])
+        self.assertGreaterEqual(len(messages[1]["meta"]["agent_trace"]), 4)
         citations = messages[1]["meta"]["citations"]
         self.assertGreaterEqual(len(citations), 1)
         self.assertIn("document_id", citations[0])
@@ -261,6 +266,10 @@ class V1FlowTest(unittest.TestCase):
         search = self.client.get("/api/search", headers=headers, params={"q": "检索架构"})
         self.assertEqual(search.status_code, 200, search.text)
         self.assertIn("source", search.json()["results"][0])
+
+        capabilities = self.client.get("/api/agents/capabilities", headers=headers)
+        self.assertEqual(capabilities.status_code, 200, capabilities.text)
+        self.assertEqual(["router", "retrieval", "qa", "memory"], [item["id"] for item in capabilities.json()["agents"]])
 
         other_user_headers = self.login("tech@example.com")
         blocked = self.client.get(f"/api/conversations/{session_id}", headers=other_user_headers)

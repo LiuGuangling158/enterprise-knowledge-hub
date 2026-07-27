@@ -156,7 +156,8 @@ button {
 }
 
 .bootScreen,
-.loginShell {
+.loginShell,
+.errorShell {
   min-height: 100vh;
   display: grid;
   place-items: center;
@@ -164,7 +165,8 @@ button {
   padding: 24px;
 }
 
-.loginPanel {
+.loginPanel,
+.errorPanel {
   width: min(420px, 100%);
   border: 1px solid #e3e8ef;
   border-radius: 8px;
@@ -172,6 +174,32 @@ button {
   padding: 24px;
   display: grid;
   gap: 22px;
+}
+
+.errorPanel {
+  width: min(620px, 100%);
+}
+
+.errorPanel h1 {
+  margin: 4px 0 8px;
+  color: #142d4c;
+}
+
+.errorPanel p {
+  margin: 0;
+  color: #667085;
+  line-height: 1.65;
+}
+
+.errorPanel pre {
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #fff5f4;
+  color: #b42318;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .loginBrand span {
@@ -262,7 +290,8 @@ button {
 .metricItem,
 .panelBlock,
 .docRecord,
-.toolbar {
+.toolbar,
+.agentBand {
   border: 1px solid #e3e8ef;
   border-radius: 8px;
   background: #ffffff;
@@ -289,6 +318,99 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   gap: 18px;
+}
+
+.agentMetricGrid {
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+}
+
+.agentWorkspaceGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 16px;
+}
+
+.agentBand {
+  padding: 18px;
+}
+
+.recentConversationBand {
+  grid-column: 1 / -1;
+}
+
+.agentPipeline,
+.toolList,
+.conversationList {
+  display: grid;
+  gap: 10px;
+}
+
+.agentNode {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #eef2f6;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.agentNodeIcon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #e8f2f1;
+  color: #1f6b67;
+}
+
+.agentNode strong,
+.toolList strong,
+.conversationList strong {
+  display: block;
+  color: #1f2937;
+}
+
+.agentNode p {
+  margin: 6px 0 0;
+  color: #475467;
+  line-height: 1.55;
+}
+
+.agentToolChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.agentToolChips span,
+.toolList span,
+.conversationList span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.agentToolChips span {
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: #eef6f5;
+  color: #1f6b67;
+}
+
+.toolList article,
+.conversationList article {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid #eef2f6;
+}
+
+.toolList article:first-child,
+.conversationList article:first-child {
+  border-top: 0;
 }
 
 .panelBlock {
@@ -883,9 +1005,79 @@ button {
   font-size: 11px;
 }
 
-.trace {
+.agentTracePanel {
   border-top: 1px solid #e3e8ef;
-  padding-top: 10px;
+  padding-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.traceHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #142d4c;
+}
+
+.traceHeader div {
+  display: grid;
+  gap: 2px;
+}
+
+.traceHeader span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.agentTraceSteps {
+  display: grid;
+  gap: 8px;
+}
+
+.agentTraceItem {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.agentTraceItem svg {
+  color: #1f6b67;
+  margin-top: 2px;
+}
+
+.agentTraceItem strong {
+  color: #1f2937;
+  font-size: 13px;
+}
+
+.agentTraceItem p {
+  margin: 4px 0 0;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.traceHitList {
+  display: grid;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.traceHitList span {
+  padding: 5px 7px;
+  border-radius: 8px;
+  background: #f2f6fb;
+  color: #475467;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.trace {
+  padding-top: 4px;
   color: #475467;
   font-size: 12px;
 }
@@ -939,6 +1131,7 @@ button {
 
   .metricGrid,
   .twoColumn,
+  .agentWorkspaceGrid,
   .docGrid,
   .editorLayout,
   .formGrid {

@@ -37,7 +37,10 @@ export function Layout({ activeView, user, query, onNavigate, onQueryChange, onO
             <button
               className={activeView === key ? "navButton active" : "navButton"}
               key={key}
-              onClick={() => (key === "qa" ? onOpenKnowledge() : onNavigate(key))}
+              onClick={() => {
+                onNavigate(key);
+                if (key === "qa") onOpenKnowledge();
+              }}
               title={label}
             >
               <Icon size={18} />

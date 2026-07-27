@@ -1,4 +1,4 @@
-import { FileText, Send, X } from "lucide-react";
+import { Bot, CheckCircle2, Database, FileText, GitBranch, Route, Search, Send, ShieldCheck, Wrench, X } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "../services/api";
 import type { ConversationMessage } from "../types";
@@ -19,6 +19,20 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   citations?: Citation[];
+}
+
+interface AgentTraceEvent extends Record<string, unknown> {
+  event: string;
+  agent?: string;
+  agent_name?: string;
+  objective?: string;
+  tool?: string;
+  intent?: string;
+  confidence?: string | number;
+  hit_count?: number;
+  citation_count?: number;
+  rewritten_query?: string;
+  hits?: Array<Record<string, unknown>>;
 }
 
 const welcomeMessage: Message = {
@@ -72,12 +86,47 @@ function messageFromHistory(message: ConversationMessage): Message {
   };
 }
 
+function iconForTrace(item: AgentTraceEvent) {
+  if (item.event === "tool_call" || item.event === "tool_result") return Wrench;
+  if (item.event === "agent_plan") return GitBranch;
+  if (item.event === "guardrail_result") return ShieldCheck;
+  if (item.event === "conversation_saved" || item.agent === "memory") return Database;
+  if (item.agent === "router") return Route;
+  if (item.agent === "retrieval") return Search;
+  if (item.event === "agent_complete") return CheckCircle2;
+  return Bot;
+}
+
+function traceTitle(item: AgentTraceEvent) {
+  if (item.event === "agent_plan") return "执行计划";
+  if (item.event === "tool_call") return `${item.agent_name || item.agent || "Agent"} 调用工具`;
+  if (item.event === "tool_result") return `${item.tool || "工具"} 返回结果`;
+  if (item.event === "guardrail_result") return "证据校验";
+  if (item.event === "conversation_saved") return "记忆保存";
+  if (item.event === "agent_complete") return "任务完成";
+  if (item.event === "agent_start") return `${item.agent_name || item.agent || "Agent"} 启动`;
+  if (item.event === "agent_result") return `${item.agent_name || item.agent || "Agent"} 完成`;
+  return item.event;
+}
+
+function traceDescription(item: AgentTraceEvent) {
+  if (item.objective) return String(item.objective);
+  if (item.event === "agent_plan" && Array.isArray(item.steps)) return `计划 ${item.steps.length} 个执行步骤`;
+  if (item.event === "tool_call") return `工具：${item.tool || "unknown"}`;
+  if (item.event === "tool_result") return `命中 ${item.hit_count ?? 0} 条证据`;
+  if (item.event === "guardrail_result") return `置信度：${item.confidence || "unknown"}，引用 ${item.citation_count ?? 0} 个`;
+  if (item.event === "agent_complete") return `置信度：${item.confidence || "unknown"}`;
+  if (item.intent) return `意图：${item.intent}`;
+  if (item.rewritten_query) return `改写查询：${item.rewritten_query}`;
+  return "";
+}
+
 export function KnowledgePanel({ open, onClose, userId }: { open: boolean; onClose: () => void; userId: string }) {
   const [sessionId, setSessionId] = useState(() => getSessionId(userId));
   const [messages, setMessages] = useState<Message[]>([welcomeMessage]);
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
-  const [trace, setTrace] = useState<Array<Record<string, unknown>>>([]);
+  const [trace, setTrace] = useState<AgentTraceEvent[]>([]);
 
   useEffect(() => {
     const nextSessionId = getSessionId(userId);
@@ -129,12 +178,13 @@ export function KnowledgePanel({ open, onClose, userId }: { open: boolean; onClo
           });
         },
         (meta) => {
-          setTrace((current) => [...current, meta]);
-          if (meta.event === "agent_complete" && Array.isArray(meta.citations)) {
+          const traceEvent = meta as AgentTraceEvent;
+          setTrace((current) => [...current, traceEvent]);
+          if (traceEvent.event === "agent_complete" && Array.isArray(traceEvent.citations)) {
             setMessages((current) => {
               const next = [...current];
               const last = next[next.length - 1];
-              next[next.length - 1] = { ...last, citations: meta.citations as Citation[] };
+              next[next.length - 1] = { ...last, citations: traceEvent.citations as Citation[] };
               return next;
             });
           }
@@ -185,12 +235,42 @@ export function KnowledgePanel({ open, onClose, userId }: { open: boolean; onClo
           </div>
         ))}
         {trace.length ? (
-          <details className="trace">
-            <summary>查看执行详情</summary>
-            {trace.map((item, index) => (
-              <code key={index}>{JSON.stringify(item)}</code>
-            ))}
-          </details>
+          <section className="agentTracePanel">
+            <div className="traceHeader">
+              <Bot size={16} />
+              <div>
+                <strong>Agent 执行链路</strong>
+                <span>{trace.find((item) => item.event === "agent_complete")?.confidence ? "已完成" : "运行中"}</span>
+              </div>
+            </div>
+            <div className="agentTraceSteps">
+              {trace.map((item, index) => {
+                const Icon = iconForTrace(item);
+                return (
+                  <article className="agentTraceItem" key={`${item.event}-${index}`}>
+                    <Icon size={15} />
+                    <div>
+                      <strong>{traceTitle(item)}</strong>
+                      {traceDescription(item) ? <p>{traceDescription(item)}</p> : null}
+                      {item.event === "tool_result" && Array.isArray(item.hits) && item.hits.length ? (
+                        <div className="traceHitList">
+                          {item.hits.slice(0, 3).map((hit) => (
+                            <span key={String(hit.citation)}>{String(hit.title)} · v{String(hit.version)} · {String(hit.score)}</span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            <details className="trace">
+              <summary>原始事件</summary>
+              {trace.map((item, index) => (
+                <code key={index}>{JSON.stringify(item)}</code>
+              ))}
+            </details>
+          </section>
         ) : null}
       </div>
       <form className="questionForm" onSubmit={submit}>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Layout } from "./components/Layout";
 import { KnowledgePanel } from "./components/KnowledgePanel";
+import { AgentWorkspace } from "./pages/AgentWorkspace";
 import { ApprovalCenter } from "./pages/ApprovalCenter";
 import { Analytics } from "./pages/Analytics";
 import { Dashboard } from "./pages/Dashboard";
@@ -175,7 +176,7 @@ export default function App() {
         />
       )}
       {view === "qa" && (
-        <Dashboard documents={filteredDocuments} approvals={approvals} metrics={metrics} onOpenKnowledge={() => setPanelOpen(true)} />
+        <AgentWorkspace onOpenKnowledge={() => setPanelOpen(true)} />
       )}
       {view === "analytics" && <Analytics metrics={metrics} />}
       {view === "admin" && (
