@@ -27,20 +27,27 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
+  function resetEditorState(nextSummary = "创建文档") {
+    setDocument(null);
+    setVersions([]);
+    setApprovalHistory([]);
+    setComments([]);
+    setTitle("");
+    setTags("");
+    setVisibility("department");
+    setContent("");
+    setSummary(nextSummary);
+    setCommentText("");
+  }
+
   useEffect(() => {
     if (!documentId) {
-      setDocument(null);
-      setVersions([]);
-      setApprovalHistory([]);
-      setComments([]);
-      setTitle("");
-      setTags("");
-      setVisibility("department");
-      setContent("");
-      setSummary("创建文档");
-      setCommentText("");
+      resetEditorState();
       return;
     }
+
+    let cancelled = false;
+    setMessage("");
 
     Promise.all([
       api.document(documentId),
@@ -48,6 +55,7 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
       api.documentApprovals(documentId),
       api.comments(documentId)
     ]).then(([doc, versionRows, approvalRows, commentRows]) => {
+      if (cancelled) return;
       setDocument(doc);
       setVersions(versionRows);
       setApprovalHistory(approvalRows);
@@ -58,7 +66,15 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
       setContent(doc.content);
       setSummary("更新文档内容");
       setCommentText("");
+    }).catch((reason) => {
+      if (cancelled) return;
+      resetEditorState("更新文档内容");
+      setMessage(reason instanceof Error ? reason.message : "文档加载失败");
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [documentId]);
 
   const parsedTags = useMemo(
@@ -167,6 +183,10 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
       setMessage("请先保存文档再评论");
       return;
     }
+    if (document.status === "archived") {
+      setMessage("已归档文档不可继续评论");
+      return;
+    }
     if (!content) {
       setMessage("请输入评论内容");
       return;
@@ -225,7 +245,7 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
           <button
             className="primaryAction"
             onClick={submitForReview}
-            disabled={!title || !content || document?.status === "reviewing" || document?.status === "archived"}
+            disabled={saving || !title || !content || document?.status === "reviewing" || document?.status === "archived"}
           >
             <Send size={16} />
             <span>提交审批</span>
@@ -331,10 +351,20 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
               <textarea
                 value={commentText}
                 onChange={(event) => setCommentText(event.target.value)}
-                placeholder={document ? "写下处理意见或补充说明" : "保存文档后可评论"}
-                disabled={!document || saving}
+                placeholder={
+                  !document
+                    ? "保存文档后可评论"
+                    : document.status === "archived"
+                      ? "已归档文档不可继续评论"
+                      : "写下处理意见或补充说明"
+                }
+                disabled={!document || saving || document.status === "archived"}
               />
-              <button className="secondaryAction" onClick={addComment} disabled={!document || saving || !commentText.trim()}>
+              <button
+                className="secondaryAction"
+                onClick={addComment}
+                disabled={!document || saving || document.status === "archived" || !commentText.trim()}
+              >
                 <MessageSquarePlus size={16} />
                 <span>添加评论</span>
               </button>

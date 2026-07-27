@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.session import Base
@@ -93,6 +93,15 @@ class DocumentComment(Base):
 
 class Approval(Base):
     __tablename__ = "approvals"
+    __table_args__ = (
+        Index(
+            "ix_approvals_one_pending_per_document",
+            "document_id",
+            unique=True,
+            sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     document_id: Mapped[str] = mapped_column(String(64), ForeignKey("documents.id"), nullable=False)

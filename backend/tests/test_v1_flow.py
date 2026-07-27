@@ -12,6 +12,7 @@ os.environ["APP_ENV"] = "test"
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB.as_posix()}"
 
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 from database.session import engine  # noqa: E402
 from main import app  # noqa: E402
@@ -90,6 +91,13 @@ class V1FlowTest(unittest.TestCase):
         self.assertEqual(submitted.status_code, 200, submitted.text)
         approval_id = submitted.json()["id"]
 
+        duplicate_submit = self.client.post(
+            f"/api/documents/{document_id}/submit",
+            headers=headers,
+            json={"summary": "Duplicate V1 approval"},
+        )
+        self.assertEqual(duplicate_submit.status_code, 409, duplicate_submit.text)
+
         history = self.client.get(f"/api/documents/{document_id}/approvals", headers=headers)
         self.assertEqual(history.status_code, 200, history.text)
         self.assertEqual(history.json()[0]["id"], approval_id)
@@ -143,6 +151,13 @@ class V1FlowTest(unittest.TestCase):
         self.assertEqual(archived.status_code, 200, archived.text)
         self.assertEqual(archived.json()["status"], "archived")
 
+        comment_archived = self.client.post(
+            f"/api/documents/{document_id}/comments",
+            headers=headers,
+            json={"content": "Should be blocked"},
+        )
+        self.assertEqual(comment_archived.status_code, 409, comment_archived.text)
+
         default_documents = self.client.get("/api/documents", headers=headers)
         self.assertEqual(default_documents.status_code, 200, default_documents.text)
         self.assertNotIn(document_id, [item["id"] for item in default_documents.json()])
@@ -175,6 +190,18 @@ class V1FlowTest(unittest.TestCase):
         headers = self.login("product@example.com")
         response = self.client.post("/api/documents/doc-002/archive", headers=headers)
         self.assertEqual(response.status_code, 403, response.text)
+
+    def test_pending_approval_unique_index_exists(self) -> None:
+        if engine.dialect.name != "sqlite":
+            self.skipTest("index inspection is implemented for sqlite smoke tests")
+
+        with engine.connect() as connection:
+            rows = connection.execute(text("PRAGMA index_list('approvals')")).mappings().all()
+
+        self.assertIn(
+            "ix_approvals_one_pending_per_document",
+            [row["name"] for row in rows],
+        )
 
     def test_invalid_visibility_is_rejected(self) -> None:
         headers = self.login("admin@example.com")

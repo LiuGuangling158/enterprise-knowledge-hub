@@ -18,5 +18,20 @@ def init_db() -> None:
     from database.seed import seed_demo_data
 
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_indexes()
     with SessionLocal() as db:
         seed_demo_data(db)
+
+
+def ensure_runtime_indexes() -> None:
+    if engine.dialect.name not in {"sqlite", "postgresql"}:
+        return
+
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_approvals_one_pending_per_document
+            ON approvals (document_id)
+            WHERE status = 'pending'
+            """
+        )

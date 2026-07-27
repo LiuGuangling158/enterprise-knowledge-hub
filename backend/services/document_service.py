@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from core.config import settings
@@ -174,7 +175,11 @@ class DocumentService:
                 summary=payload.summary,
             )
             db.add(approval)
-            db.commit()
+            try:
+                db.commit()
+            except IntegrityError as exc:
+                db.rollback()
+                raise HTTPException(status_code=409, detail="该文档已有待审批记录") from exc
             db.refresh(approval)
             return self._approval_to_dict(approval)
 
@@ -274,7 +279,9 @@ class DocumentService:
 
     def add_document_comment(self, document_id: str, payload, scope: dict[str, str]) -> dict:
         with SessionLocal() as db:
-            self._get_visible_document(db, document_id, scope)
+            doc = self._get_visible_document(db, document_id, scope)
+            if doc.status == "archived":
+                raise HTTPException(status_code=409, detail="已归档的文档不可继续评论")
             content = payload.content.strip()
             if not content:
                 raise HTTPException(status_code=422, detail="评论内容不能为空")
