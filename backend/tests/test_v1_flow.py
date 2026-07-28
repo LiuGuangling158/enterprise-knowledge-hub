@@ -111,6 +111,73 @@ class V1FlowTest(unittest.TestCase):
         )
         self.assertEqual(blank_name.status_code, 422, blank_name.text)
 
+    def test_operation_logs_and_sensitive_scans_are_persisted(self) -> None:
+        admin_headers = self.login("admin@example.com")
+        member_headers = self.login("product@example.com")
+        suffix = uuid4().hex[:8]
+
+        created = self.client.post(
+            "/api/documents",
+            headers=member_headers,
+            json={
+                "title": f"敏感检测闭环 {suffix}",
+                "content": "员工材料包含身份证、手机号 13812345678 和 api_key=secret-token-12345，需要检测。",
+                "tags": ["敏感检测"],
+                "visibility": "public",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        document_id = created.json()["id"]
+        auto_scan = created.json()["sensitive_scan"]
+        self.assertEqual(auto_scan["status"], "needs_attention")
+        self.assertEqual(auto_scan["risk_level"], "high")
+        self.assertGreaterEqual(auto_scan["finding_count"], 3)
+
+        scans = self.client.get(f"/api/documents/{document_id}/sensitive-scans", headers=member_headers)
+        self.assertEqual(scans.status_code, 200, scans.text)
+        self.assertIn(auto_scan["id"], [row["id"] for row in scans.json()])
+
+        manual_scan = self.client.post(f"/api/documents/{document_id}/sensitive-scan", headers=member_headers)
+        self.assertEqual(manual_scan.status_code, 200, manual_scan.text)
+        self.assertEqual(manual_scan.json()["risk_level"], "high")
+
+        other_headers = self.login("tech@example.com")
+        blocked_scan = self.client.post(f"/api/documents/{document_id}/sensitive-scan", headers=other_headers)
+        self.assertEqual(blocked_scan.status_code, 403, blocked_scan.text)
+
+        admin_scans = self.client.get(
+            "/api/admin/sensitive-scans",
+            headers=admin_headers,
+            params={"risk_level": "high"},
+        )
+        self.assertEqual(admin_scans.status_code, 200, admin_scans.text)
+        self.assertIn(document_id, [row["document_id"] for row in admin_scans.json()])
+
+        blocked_admin_scans = self.client.get("/api/admin/sensitive-scans", headers=member_headers)
+        self.assertEqual(blocked_admin_scans.status_code, 403, blocked_admin_scans.text)
+
+        document_logs = self.client.get(
+            "/api/admin/operation-logs",
+            headers=admin_headers,
+            params={"resource_type": "document"},
+        )
+        self.assertEqual(document_logs.status_code, 200, document_logs.text)
+        related_actions = {
+            row["action"]
+            for row in document_logs.json()
+            if row["resource_id"] == document_id
+        }
+        self.assertIn("document.create", related_actions)
+        self.assertIn("sensitive.scan", related_actions)
+
+        login_logs = self.client.get(
+            "/api/admin/operation-logs",
+            headers=admin_headers,
+            params={"action": "auth.login"},
+        )
+        self.assertEqual(login_logs.status_code, 200, login_logs.text)
+        self.assertTrue(any(row["actor_email"] == "admin@example.com" for row in login_logs.json()))
+
     def test_comment_and_document_approval_history_flow(self) -> None:
         headers = self.login("admin@example.com")
         suffix = uuid4().hex[:8]

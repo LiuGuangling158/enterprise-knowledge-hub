@@ -10,7 +10,6 @@ import {
   ShieldAlert,
   ShieldCheck,
   UploadCloud,
-  UserCog,
   Users
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -520,6 +519,8 @@ function OverviewPanel({ overview }: { overview: AdminOverview }) {
         <AdminMetric label="文档" value={overview.metrics.document_total} Icon={FileText} />
         <AdminMetric label="上传" value={overview.metrics.upload_total} Icon={UploadCloud} />
         <AdminMetric label="待审批" value={overview.metrics.pending_approvals} Icon={ShieldCheck} />
+        <AdminMetric label="待处理风险" value={overview.metrics.sensitive_risk_total} Icon={ShieldAlert} />
+        <AdminMetric label="操作日志" value={overview.metrics.operation_log_total} Icon={ScrollText} />
       </div>
 
       <div className="twoColumn">
@@ -599,6 +600,34 @@ function riskText(risk: string) {
     medium: "中风险",
     high: "高风险"
   }[risk] ?? risk;
+}
+
+function actionText(action: string) {
+  return {
+    "auth.login": "用户登录",
+    "auth.register": "用户注册",
+    "document.create": "创建文档",
+    "document.upload": "上传文档",
+    "document.update": "更新文档",
+    "document.archive": "归档文档",
+    "document.restore": "恢复文档",
+    "approval.submit": "提交审批",
+    "approval.review": "处理审批",
+    "comment.create": "添加评论",
+    "qa.ask": "知识问答",
+    "sensitive.scan": "敏感检测",
+    "admin.user.update": "更新用户"
+  }[action] ?? action;
+}
+
+function resourceText(resourceType: string) {
+  return {
+    user: "用户",
+    document: "文档",
+    approval: "审批",
+    comment: "评论",
+    conversation: "会话"
+  }[resourceType] ?? resourceType;
 }
 
 function formatBytes(bytes: number) {

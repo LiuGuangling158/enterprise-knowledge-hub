@@ -1,4 +1,15 @@
-import { Archive, ArchiveRestore, ArrowLeft, Eye, FileUp, MessageSquarePlus, Save, Send, SquarePen } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  ArrowLeft,
+  Eye,
+  FileUp,
+  MessageSquarePlus,
+  Save,
+  Send,
+  ShieldAlert,
+  SquarePen
+} from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../services/api";
 import type { ApprovalItem, DocumentComment, DocumentVersion, KnowledgeDocument, VersionCompareResult } from "../types";
@@ -240,6 +251,25 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
     }
   }
 
+  async function runSensitiveScan() {
+    if (!document) {
+      setMessage("请先保存文档再执行敏感检测");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+    try {
+      const scan = await api.runSensitiveScan(document.id);
+      setDocument((current) => (current ? { ...current, sensitive_scan: scan } : current));
+      setMessage(scan.finding_count ? `检测完成，发现 ${scan.finding_count} 项风险` : "检测完成，未发现敏感信息");
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "敏感检测失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function uploadFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -382,6 +412,33 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
           <div className="sideBlock">
             <h2>自动摘要</h2>
             <p>{document?.summary || "保存后自动生成摘要"}</p>
+          </div>
+          <div className="sideBlock">
+            <h2>敏感检测</h2>
+            {document?.sensitive_scan ? (
+              <>
+                <span className={`status ${document.sensitive_scan.status === "needs_attention" ? "rejected" : "approved"}`}>
+                  {riskText(document.sensitive_scan.risk_level)} · {document.sensitive_scan.finding_count} 项
+                </span>
+                <p>{document.sensitive_scan.summary}</p>
+                {document.sensitive_scan.findings.length ? (
+                  <div className="sensitiveFindingList">
+                    {document.sensitive_scan.findings.slice(0, 4).map((finding, index) => (
+                      <span key={`${document.sensitive_scan?.id}-${index}`}>
+                        {finding.term ?? finding.message}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <small>{formatDate(document.sensitive_scan.created_at)}</small>
+              </>
+            ) : (
+              <p>保存后自动生成检测结果</p>
+            )}
+            <button className="secondaryAction" onClick={runSensitiveScan} disabled={!document || saving}>
+              <ShieldAlert size={16} />
+              <span>重新检测</span>
+            </button>
           </div>
           <div className="sideBlock">
             <h2>审批记录</h2>

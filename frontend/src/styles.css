@@ -638,7 +638,7 @@ button {
 }
 
 .adminMetricGrid {
-  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .adminTabs {
@@ -709,7 +709,8 @@ button {
 
 .adminTable small,
 .departmentItem span,
-.adminRecord span {
+.adminRecord span,
+.metadataLine {
   display: block;
   color: #667085;
   font-size: 12px;
@@ -1042,6 +1043,24 @@ button {
   border-radius: 999px;
   background: #ffffff;
   color: #475467;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.compactRiskList {
+  margin-top: 8px;
+}
+
+.sensitiveFindingList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sensitiveFindingList span {
+  border-radius: 999px;
+  background: #fff5f4;
+  color: #b42318;
   padding: 5px 8px;
   font-size: 12px;
 }
