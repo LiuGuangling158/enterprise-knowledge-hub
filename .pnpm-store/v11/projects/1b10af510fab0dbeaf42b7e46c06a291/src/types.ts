@@ -135,6 +135,52 @@ export interface MetricSnapshot {
   top_documents: KnowledgeDocument[];
 }
 
+export interface AdminUser extends UserProfile {
+  created_at: string;
+  document_count: number;
+  submitted_approval_count: number;
+  reviewed_approval_count: number;
+  conversation_count: number;
+}
+
+export interface AdminDepartment {
+  id: string;
+  tenant_id: string;
+  name: string;
+  created_at: string;
+  user_count: number;
+  document_count: number;
+  published_count: number;
+  pending_approval_count: number;
+  upload_count: number;
+}
+
+export interface AdminUpload extends DocumentUploadMetadata {
+  title: string;
+  department: string;
+  uploader: string;
+}
+
+export interface AdminOverview {
+  metrics: {
+    user_total: number;
+    department_total: number;
+    document_total: number;
+    upload_total: number;
+    pending_approvals: number;
+    published_documents: number;
+    archived_documents: number;
+    weekly_new_documents: number;
+    weekly_uploads: number;
+    total_reads: number;
+  };
+  status_breakdown: Array<{ status: DocumentStatus; count: number }>;
+  department_breakdown: AdminDepartment[];
+  recent_documents: KnowledgeDocument[];
+  recent_approvals: ApprovalItem[];
+  recent_uploads: AdminUpload[];
+}
+
 export interface SearchHit {
   document_id: string;
   title: string;

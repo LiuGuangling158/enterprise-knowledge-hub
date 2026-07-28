@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
@@ -27,6 +27,8 @@ from database.session import SessionLocal
 
 
 SUPPORTED_UPLOAD_SUFFIXES = {".md": "markdown", ".markdown": "markdown", ".txt": "plain_text"}
+DOCUMENT_STATUSES = {"all", "draft", "reviewing", "published", "rejected", "archived"}
+APPROVAL_STATUSES = {"all", "pending", "approved", "rejected"}
 
 
 class DocumentService:
@@ -432,10 +434,11 @@ class DocumentService:
         since = datetime.now(timezone.utc) - timedelta(days=7)
         weekly_new = len([row for row in rows if self._parse_datetime(row["created_at"]) >= since])
         pending = len([item for item in self.list_approvals(scope) if item["status"] == "pending"])
+        active_users = self._active_user_count(scope)
         return {
             "document_total": len(rows),
             "weekly_new": weekly_new,
-            "active_users": 128,
+            "active_users": active_users,
             "pending_approvals": pending,
             "trend": [
                 {"day": "周一", "documents": 4, "reads": 86},
@@ -446,6 +449,204 @@ class DocumentService:
             ],
             "top_documents": sorted(rows, key=lambda row: row["reads"], reverse=True)[:5],
         }
+
+    def admin_overview(self, scope: dict[str, str]) -> dict:
+        self._assert_admin(scope)
+        with SessionLocal() as db:
+            users = db.scalars(
+                select(User)
+                .options(joinedload(User.department))
+                .where(User.tenant_id == scope["tenant_id"])
+                .order_by(User.created_at.desc())
+            ).all()
+            departments = db.scalars(
+                select(Department)
+                .where(Department.tenant_id == scope["tenant_id"])
+                .order_by(Department.created_at.asc())
+            ).all()
+            documents = db.scalars(
+                select(Document)
+                .options(joinedload(Document.author), joinedload(Document.department))
+                .where(Document.tenant_id == scope["tenant_id"])
+                .order_by(Document.updated_at.desc())
+            ).all()
+            approvals = db.scalars(
+                select(Approval)
+                .join(Approval.document)
+                .options(
+                    joinedload(Approval.document),
+                    joinedload(Approval.submitter),
+                    joinedload(Approval.reviewer),
+                )
+                .where(Document.tenant_id == scope["tenant_id"])
+                .order_by(Approval.submitted_at.desc())
+            ).all()
+            uploads = db.scalars(
+                select(DocumentUpload)
+                .options(
+                    joinedload(DocumentUpload.document),
+                    joinedload(DocumentUpload.department),
+                    joinedload(DocumentUpload.uploader),
+                )
+                .where(DocumentUpload.tenant_id == scope["tenant_id"])
+                .order_by(DocumentUpload.created_at.desc())
+            ).all()
+
+            since = datetime.now(timezone.utc) - timedelta(days=7)
+            status_counts = self._document_status_counts(documents)
+            department_rows = [
+                self._admin_department_to_dict(department, users, documents, approvals)
+                for department in departments
+            ]
+            return {
+                "metrics": {
+                    "user_total": len(users),
+                    "department_total": len(departments),
+                    "document_total": len(documents),
+                    "upload_total": len(uploads),
+                    "pending_approvals": len([item for item in approvals if item.status == "pending"]),
+                    "published_documents": status_counts.get("published", 0),
+                    "archived_documents": status_counts.get("archived", 0),
+                    "weekly_new_documents": len([doc for doc in documents if self._is_since(doc.created_at, since)]),
+                    "weekly_uploads": len([upload for upload in uploads if self._is_since(upload.created_at, since)]),
+                    "total_reads": sum(doc.reads for doc in documents),
+                },
+                "status_breakdown": [
+                    {"status": status, "count": count}
+                    for status, count in sorted(status_counts.items())
+                ],
+                "department_breakdown": department_rows,
+                "recent_documents": [self._document_to_dict(doc) for doc in documents[:6]],
+                "recent_approvals": [self._approval_to_dict(approval) for approval in approvals[:6]],
+                "recent_uploads": [self._admin_upload_to_dict(upload) for upload in uploads[:6]],
+            }
+
+    def admin_users(self, scope: dict[str, str]) -> list[dict]:
+        self._assert_admin(scope)
+        with SessionLocal() as db:
+            users = db.scalars(
+                select(User)
+                .options(joinedload(User.department))
+                .where(User.tenant_id == scope["tenant_id"])
+                .order_by(User.created_at.desc())
+            ).all()
+            documents = db.scalars(select(Document).where(Document.tenant_id == scope["tenant_id"])).all()
+            approvals = db.scalars(
+                select(Approval).join(Approval.document).where(Document.tenant_id == scope["tenant_id"])
+            ).all()
+            conversations = db.scalars(
+                select(ConversationSession).where(ConversationSession.tenant_id == scope["tenant_id"])
+            ).all()
+            return [
+                self._admin_user_to_dict(user, documents, approvals, conversations)
+                for user in users
+            ]
+
+    def admin_departments(self, scope: dict[str, str]) -> list[dict]:
+        self._assert_admin(scope)
+        with SessionLocal() as db:
+            departments = db.scalars(
+                select(Department)
+                .where(Department.tenant_id == scope["tenant_id"])
+                .order_by(Department.created_at.asc())
+            ).all()
+            users = db.scalars(select(User).where(User.tenant_id == scope["tenant_id"])).all()
+            documents = db.scalars(select(Document).where(Document.tenant_id == scope["tenant_id"])).all()
+            approvals = db.scalars(
+                select(Approval)
+                .join(Approval.document)
+                .options(joinedload(Approval.document))
+                .where(Document.tenant_id == scope["tenant_id"])
+            ).all()
+            return [
+                self._admin_department_to_dict(department, users, documents, approvals)
+                for department in departments
+            ]
+
+    def admin_documents(
+        self,
+        scope: dict[str, str],
+        status: str | None = None,
+        department_id: str | None = None,
+    ) -> list[dict]:
+        self._assert_admin(scope)
+        self._validate_status_filter(status, DOCUMENT_STATUSES, "文档状态")
+        with SessionLocal() as db:
+            statement = (
+                select(Document)
+                .options(joinedload(Document.author), joinedload(Document.department))
+                .where(Document.tenant_id == scope["tenant_id"])
+            )
+            if status and status != "all":
+                statement = statement.where(Document.status == status)
+            if department_id:
+                statement = statement.where(Document.department_id == department_id)
+            rows = db.scalars(statement.order_by(Document.updated_at.desc())).all()
+            return [self._document_to_dict(row) for row in rows]
+
+    def admin_approvals(self, scope: dict[str, str], status: str | None = None) -> list[dict]:
+        self._assert_admin(scope)
+        self._validate_status_filter(status, APPROVAL_STATUSES, "审批状态")
+        with SessionLocal() as db:
+            statement = (
+                select(Approval)
+                .join(Approval.document)
+                .options(
+                    joinedload(Approval.document),
+                    joinedload(Approval.submitter),
+                    joinedload(Approval.reviewer),
+                )
+                .where(Document.tenant_id == scope["tenant_id"])
+            )
+            if status and status != "all":
+                statement = statement.where(Approval.status == status)
+            rows = db.scalars(statement.order_by(Approval.submitted_at.desc())).all()
+            return [self._approval_to_dict(row) for row in rows]
+
+    def admin_update_user(self, user_id: str, payload, scope: dict[str, str]) -> dict:
+        self._assert_admin(scope)
+        with SessionLocal() as db:
+            user = db.scalar(
+                select(User)
+                .options(joinedload(User.department))
+                .where(User.id == user_id, User.tenant_id == scope["tenant_id"])
+            )
+            if not user:
+                raise HTTPException(status_code=404, detail="用户不存在")
+
+            if payload.department_id is not None:
+                department = db.get(Department, payload.department_id)
+                if not department or department.tenant_id != scope["tenant_id"]:
+                    raise HTTPException(status_code=400, detail="部门不存在")
+                user.department_id = payload.department_id
+
+            if payload.name is not None:
+                name = payload.name.strip()
+                if not name:
+                    raise HTTPException(status_code=422, detail="用户姓名不能为空")
+                user.name = name
+
+            if payload.role is not None and payload.role != user.role:
+                if user.role == "admin" and payload.role != "admin":
+                    admin_count = db.scalar(
+                        select(func.count())
+                        .select_from(User)
+                        .where(User.tenant_id == scope["tenant_id"], User.role == "admin")
+                    )
+                    if admin_count <= 1:
+                        raise HTTPException(status_code=409, detail="至少保留一名管理员")
+                user.role = payload.role
+
+            db.commit()
+            db.refresh(user)
+            documents = db.scalars(select(Document).where(Document.tenant_id == scope["tenant_id"])).all()
+            approvals = db.scalars(
+                select(Approval).join(Approval.document).where(Document.tenant_id == scope["tenant_id"])
+            ).all()
+            conversations = db.scalars(
+                select(ConversationSession).where(ConversationSession.tenant_id == scope["tenant_id"])
+            ).all()
+            return self._admin_user_to_dict(user, documents, approvals, conversations)
 
     def all_visible_text(self, scope: dict[str, str]) -> list[dict]:
         return self.list_documents(scope)
@@ -564,6 +765,14 @@ class DocumentService:
             return
         raise HTTPException(status_code=403, detail="无权编辑该文档")
 
+    def _assert_admin(self, scope: dict[str, str]) -> None:
+        if scope.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="仅管理员可访问管理后台")
+
+    def _validate_status_filter(self, status: str | None, allowed: set[str], label: str) -> None:
+        if status and status not in allowed:
+            raise HTTPException(status_code=422, detail=f"{label}不支持")
+
     def _resolve_department_id(self, db, requested_department_id: str | None, scope: dict[str, str]) -> str:
         department_id = requested_department_id or scope["department_id"]
         department = db.get(Department, department_id)
@@ -621,6 +830,70 @@ class DocumentService:
             "error": upload.error,
             "created_at": upload.created_at.isoformat(),
         }
+
+    def _admin_user_to_dict(
+        self,
+        user: User,
+        documents: list[Document],
+        approvals: list[Approval],
+        conversations: list[ConversationSession],
+    ) -> dict:
+        return {
+            "id": user.id,
+            "tenant_id": user.tenant_id,
+            "department_id": user.department_id,
+            "department": user.department.name if user.department else user.department_id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role,
+            "created_at": user.created_at.isoformat(),
+            "document_count": len([doc for doc in documents if doc.author_id == user.id]),
+            "submitted_approval_count": len([approval for approval in approvals if approval.submitter_id == user.id]),
+            "reviewed_approval_count": len([approval for approval in approvals if approval.reviewer_id == user.id]),
+            "conversation_count": len([conversation for conversation in conversations if conversation.user_id == user.id]),
+        }
+
+    def _admin_department_to_dict(
+        self,
+        department: Department,
+        users: list[User],
+        documents: list[Document],
+        approvals: list[Approval],
+    ) -> dict:
+        department_documents = [doc for doc in documents if doc.department_id == department.id]
+        department_approvals = [
+            approval
+            for approval in approvals
+            if approval.document and approval.document.department_id == department.id
+        ]
+        return {
+            "id": department.id,
+            "tenant_id": department.tenant_id,
+            "name": department.name,
+            "created_at": department.created_at.isoformat(),
+            "user_count": len([user for user in users if user.department_id == department.id]),
+            "document_count": len(department_documents),
+            "published_count": len([doc for doc in department_documents if doc.status == "published"]),
+            "pending_approval_count": len([approval for approval in department_approvals if approval.status == "pending"]),
+            "upload_count": len([doc for doc in department_documents if doc.uploads]),
+        }
+
+    def _admin_upload_to_dict(self, upload: DocumentUpload) -> dict:
+        row = self._upload_to_dict(upload)
+        row.update(
+            {
+                "title": upload.document.title if upload.document else upload.document_id,
+                "department": upload.department.name if upload.department else upload.department_id,
+                "uploader": upload.uploader.name if upload.uploader else upload.uploader_id,
+            }
+        )
+        return row
+
+    def _document_status_counts(self, documents: list[Document]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for doc in documents:
+            counts[doc.status] = counts.get(doc.status, 0) + 1
+        return counts
 
     def _approval_to_dict(self, approval: Approval) -> dict:
         return {
@@ -692,11 +965,26 @@ class DocumentService:
     def _new_id(self, prefix: str) -> str:
         return f"{prefix}-{uuid4().hex[:12]}"
 
+    def _active_user_count(self, scope: dict[str, str]) -> int:
+        with SessionLocal() as db:
+            document_authors = db.scalars(
+                select(Document.author_id).where(Document.tenant_id == scope["tenant_id"])
+            ).all()
+            conversation_users = db.scalars(
+                select(ConversationSession.user_id).where(ConversationSession.tenant_id == scope["tenant_id"])
+            ).all()
+            return len(set(document_authors) | set(conversation_users))
+
     def _parse_datetime(self, value: str) -> datetime:
         parsed = datetime.fromisoformat(value)
         if parsed.tzinfo is None:
             return parsed.replace(tzinfo=timezone.utc)
         return parsed
+
+    def _is_since(self, value: datetime, since: datetime) -> bool:
+        current = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+        threshold = since.replace(tzinfo=timezone.utc) if since.tzinfo is None else since
+        return current >= threshold
 
     def _summarize_document(self, title: str, content: str) -> str:
         clean = " ".join(content.split())

@@ -7,6 +7,7 @@ from agents.orchestrator import KnowledgeOrchestrator
 from api.deps import CurrentUser, documents
 from core.security import create_access_token
 from models.schemas import (
+    AdminUserUpdate,
     AskRequest,
     CommentCreate,
     ConversationSessionOut,
@@ -154,6 +155,40 @@ async def review_approval(approval_id: str, payload: ReviewRequest, user: Curren
 @router.get("/metrics")
 async def metrics(user: CurrentUser) -> dict:
     return documents.metrics(user)
+
+
+@router.get("/admin/overview")
+async def admin_overview(user: CurrentUser) -> dict:
+    return documents.admin_overview(user)
+
+
+@router.get("/admin/users")
+async def admin_users(user: CurrentUser) -> list[dict]:
+    return documents.admin_users(user)
+
+
+@router.patch("/admin/users/{user_id}")
+async def admin_update_user(user_id: str, payload: AdminUserUpdate, user: CurrentUser) -> dict:
+    return documents.admin_update_user(user_id, payload, user)
+
+
+@router.get("/admin/departments")
+async def admin_departments(user: CurrentUser) -> list[dict]:
+    return documents.admin_departments(user)
+
+
+@router.get("/admin/documents")
+async def admin_documents(
+    user: CurrentUser,
+    status: str | None = None,
+    department_id: str | None = None,
+) -> list[dict]:
+    return documents.admin_documents(user, status=status, department_id=department_id)
+
+
+@router.get("/admin/approvals")
+async def admin_approvals(user: CurrentUser, status: str | None = None) -> list[dict]:
+    return documents.admin_approvals(user, status=status)
 
 
 @router.get("/conversations", response_model=list[ConversationSessionOut])

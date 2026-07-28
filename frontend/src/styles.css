@@ -637,6 +637,140 @@ button {
   padding: 10px 12px;
 }
 
+.adminMetricGrid {
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
+}
+
+.adminTabs {
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.adminTabs button {
+  min-width: 76px;
+  padding: 0 14px;
+}
+
+.adminSectionHeader {
+  align-items: center;
+}
+
+.adminFilters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.adminFilters select,
+.adminTable input,
+.adminTable select {
+  min-height: 36px;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0 10px;
+  outline: 0;
+}
+
+.adminTableWrap {
+  overflow-x: auto;
+}
+
+.adminTable {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+}
+
+.adminTable th,
+.adminTable td {
+  border-top: 1px solid #eef2f6;
+  padding: 12px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.adminTable th {
+  color: #475467;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.adminTable td:first-child {
+  min-width: 220px;
+}
+
+.adminTable input,
+.adminTable select {
+  width: 100%;
+}
+
+.adminTable small,
+.departmentItem span,
+.adminRecord span {
+  display: block;
+  color: #667085;
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+.departmentGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.departmentItem {
+  min-height: 104px;
+  border-top: 1px solid #eef2f6;
+  padding: 14px 0;
+  display: grid;
+  gap: 12px;
+}
+
+.departmentStats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.departmentStats span {
+  margin: 0;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467;
+  padding: 5px 8px;
+}
+
+.adminList {
+  display: grid;
+  gap: 0;
+}
+
+.adminRecord {
+  min-height: 82px;
+  border-top: 1px solid #eef2f6;
+  padding: 14px 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+}
+
+.adminRecord:first-child,
+.departmentItem:first-child {
+  border-top: 0;
+}
+
+.adminRecord p {
+  margin: 7px 0 0;
+  color: #667085;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
 .emptyText {
   margin: 0;
   color: #667085;
@@ -1146,8 +1280,21 @@ button {
   .agentWorkspaceGrid,
   .docGrid,
   .editorLayout,
-  .formGrid {
+  .formGrid,
+  .departmentGrid {
     grid-template-columns: 1fr;
+  }
+
+  .adminMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .adminRecord {
+    grid-template-columns: 1fr;
+  }
+
+  .adminRecord .recordActions {
+    justify-content: flex-start;
   }
 }
 

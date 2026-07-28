@@ -47,6 +47,70 @@ class V1FlowTest(unittest.TestCase):
         token = response.json()["access_token"]
         return {"Authorization": f"Bearer {token}"}
 
+    def test_admin_backend_requires_admin_and_updates_user(self) -> None:
+        admin_headers = self.login("admin@example.com")
+        member_headers = self.login("product@example.com")
+
+        blocked = self.client.get("/api/admin/overview", headers=member_headers)
+        self.assertEqual(blocked.status_code, 403, blocked.text)
+
+        suffix = uuid4().hex[:8]
+        registered = self.client.post(
+            "/api/auth/register",
+            json={
+                "name": f"后台测试用户{suffix}",
+                "email": f"admin-flow-{suffix}@example.com",
+                "password": "123456",
+                "department_id": "dept-product",
+            },
+        )
+        self.assertEqual(registered.status_code, 200, registered.text)
+        user_id = registered.json()["user"]["id"]
+
+        overview = self.client.get("/api/admin/overview", headers=admin_headers)
+        self.assertEqual(overview.status_code, 200, overview.text)
+        self.assertGreaterEqual(overview.json()["metrics"]["user_total"], 4)
+        self.assertGreaterEqual(overview.json()["metrics"]["department_total"], 4)
+        self.assertIn("department_breakdown", overview.json())
+
+        departments = self.client.get("/api/admin/departments", headers=admin_headers)
+        self.assertEqual(departments.status_code, 200, departments.text)
+        self.assertIn("dept-tech", [row["id"] for row in departments.json()])
+
+        updated = self.client.patch(
+            f"/api/admin/users/{user_id}",
+            headers=admin_headers,
+            json={"role": "editor", "department_id": "dept-tech", "name": f"更新用户{suffix}"},
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["role"], "editor")
+        self.assertEqual(updated.json()["department_id"], "dept-tech")
+        self.assertEqual(updated.json()["name"], f"更新用户{suffix}")
+
+        users = self.client.get("/api/admin/users", headers=admin_headers)
+        self.assertEqual(users.status_code, 200, users.text)
+        updated_user = next(row for row in users.json() if row["id"] == user_id)
+        self.assertEqual(updated_user["department"], "技术部")
+        self.assertIn("document_count", updated_user)
+
+        documents = self.client.get("/api/admin/documents", headers=admin_headers, params={"status": "reviewing"})
+        self.assertEqual(documents.status_code, 200, documents.text)
+        self.assertIn("doc-002", [row["id"] for row in documents.json()])
+
+        approvals = self.client.get("/api/admin/approvals", headers=admin_headers, params={"status": "pending"})
+        self.assertEqual(approvals.status_code, 200, approvals.text)
+        self.assertIn("approval-001", [row["id"] for row in approvals.json()])
+
+        invalid_status = self.client.get("/api/admin/documents", headers=admin_headers, params={"status": "deleted"})
+        self.assertEqual(invalid_status.status_code, 422, invalid_status.text)
+
+        blank_name = self.client.patch(
+            f"/api/admin/users/{user_id}",
+            headers=admin_headers,
+            json={"name": "   "},
+        )
+        self.assertEqual(blank_name.status_code, 422, blank_name.text)
+
     def test_comment_and_document_approval_history_flow(self) -> None:
         headers = self.login("admin@example.com")
         suffix = uuid4().hex[:8]

@@ -1,5 +1,8 @@
 import type {
   AgentCapabilities,
+  AdminDepartment,
+  AdminOverview,
+  AdminUser,
   ApprovalItem,
   ConversationSession,
   DocumentComment,
@@ -151,6 +154,30 @@ export const api = {
       body: JSON.stringify({ action, reason })
     }),
   metrics: () => request<MetricSnapshot>("/api/metrics"),
+  adminOverview: () => request<AdminOverview>("/api/admin/overview"),
+  adminUsers: () => request<AdminUser[]>("/api/admin/users"),
+  updateAdminUser: (
+    id: string,
+    payload: {
+      name?: string;
+      role?: UserProfile["role"];
+      department_id?: string;
+    }
+  ) =>
+    request<AdminUser>(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  adminDepartments: () => request<AdminDepartment[]>("/api/admin/departments"),
+  adminDocuments: (filters: { status?: string; departmentId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.status) params.set("status", filters.status);
+    if (filters.departmentId) params.set("department_id", filters.departmentId);
+    const suffix = params.toString();
+    return request<KnowledgeDocument[]>(`/api/admin/documents${suffix ? `?${suffix}` : ""}`);
+  },
+  adminApprovals: (status?: string) =>
+    request<ApprovalItem[]>(`/api/admin/approvals${status ? `?status=${encodeURIComponent(status)}` : ""}`),
   agentCapabilities: () => request<AgentCapabilities>("/api/agents/capabilities"),
   conversations: () => request<ConversationSession[]>("/api/conversations"),
   conversation: (sessionId: string) => request<ConversationSession>(`/api/conversations/${sessionId}`),

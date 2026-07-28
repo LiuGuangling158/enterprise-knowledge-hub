@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Layout } from "./components/Layout";
 import { KnowledgePanel } from "./components/KnowledgePanel";
+import { AdminDashboard } from "./pages/AdminDashboard";
 import { AgentWorkspace } from "./pages/AgentWorkspace";
 import { ApprovalCenter } from "./pages/ApprovalCenter";
 import { Analytics } from "./pages/Analytics";
@@ -180,19 +181,14 @@ export default function App() {
       )}
       {view === "analytics" && <Analytics metrics={metrics} />}
       {view === "admin" && (
-        <DocumentLibrary
-          documents={filteredDocuments}
-          archivedDocuments={filteredArchivedDocuments}
-          onCreate={() => {
-            setSelectedDocumentId(null);
-            setView("editor");
-          }}
-          onEdit={(id) => {
+        <AdminDashboard
+          currentUser={user}
+          query={query}
+          onOpenDocument={(id) => {
             setSelectedDocumentId(id);
             setView("editor");
           }}
-          onArchive={(id) => api.archiveDocument(id).then(() => refreshData())}
-          onRestore={(id) => api.restoreDocument(id).then(() => refreshData())}
+          onDataChanged={refreshData}
         />
       )}
       <KnowledgePanel open={panelOpen} onClose={() => setPanelOpen(false)} userId={user.id} />

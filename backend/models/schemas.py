@@ -57,6 +57,12 @@ class ReviewRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 
 
+class AdminUserUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    role: Literal["admin", "editor", "member"] | None = None
+    department_id: str | None = None
+
+
 class CommentCreate(BaseModel):
     content: str = Field(min_length=1, max_length=2000)
 
