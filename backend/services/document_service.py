@@ -10,6 +10,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
+from agents.review_agent import ReviewAgent
 from core.config import settings
 from core.security import hash_password, verify_password
 from database.models import (
@@ -21,17 +22,24 @@ from database.models import (
     DocumentComment,
     DocumentUpload,
     DocumentVersion,
+    OperationLog,
+    SensitiveScan,
     User,
 )
 from database.session import SessionLocal
+from skills.sensitive_detect import detect_sensitive_terms
 
 
 SUPPORTED_UPLOAD_SUFFIXES = {".md": "markdown", ".markdown": "markdown", ".txt": "plain_text"}
 DOCUMENT_STATUSES = {"all", "draft", "reviewing", "published", "rejected", "archived"}
 APPROVAL_STATUSES = {"all", "pending", "approved", "rejected"}
+SENSITIVE_RISK_LEVELS = {"all", "none", "low", "medium", "high"}
 
 
 class DocumentService:
+    def __init__(self) -> None:
+        self.review_agent = ReviewAgent()
+
     def register_user(self, payload) -> dict:
         with SessionLocal() as db:
             existing = db.scalar(select(User).where(User.email == payload.email))
@@ -52,6 +60,16 @@ class DocumentService:
                 password_hash=hash_password(payload.password),
             )
             db.add(user)
+            db.flush()
+            self._add_operation_log(
+                db,
+                {"tenant_id": user.tenant_id, "user_id": user.id},
+                "auth.register",
+                "user",
+                user.id,
+                "用户注册",
+                {"email": user.email, "department_id": user.department_id},
+            )
             db.commit()
             db.refresh(user)
             return self._user_to_dict(user)
@@ -62,6 +80,19 @@ class DocumentService:
             if not user or not verify_password(password, user.password_hash):
                 return None
             return self._user_to_dict(user)
+
+    def record_operation(
+        self,
+        scope: dict[str, str],
+        action: str,
+        resource_type: str,
+        resource_id: str | None = None,
+        summary: str = "",
+        metadata: dict | None = None,
+    ) -> None:
+        with SessionLocal() as db:
+            self._add_operation_log(db, scope, action, resource_type, resource_id, summary, metadata)
+            db.commit()
 
     def get_user(self, user_id: str) -> dict | None:
         with SessionLocal() as db:
@@ -109,6 +140,16 @@ class DocumentService:
             db.add(doc)
             db.flush()
             self._add_version(db, doc, scope["user_id"], "创建文档")
+            self._scan_document_for_sensitive(db, doc, scope["user_id"], "create")
+            self._add_operation_log(
+                db,
+                scope,
+                "document.create",
+                "document",
+                doc.id,
+                "创建文档",
+                {"title": doc.title, "visibility": doc.visibility, "department_id": doc.department_id},
+            )
             db.commit()
             db.refresh(doc)
             return self._document_to_dict(doc)
@@ -180,6 +221,22 @@ class DocumentService:
             )
             db.add(upload)
             self._add_version(db, doc, scope["user_id"], f"上传解析：{original_filename}")
+            self._scan_document_for_sensitive(db, doc, scope["user_id"], "upload")
+            self._add_operation_log(
+                db,
+                scope,
+                "document.upload",
+                "document",
+                doc.id,
+                "上传文档并解析",
+                {
+                    "title": doc.title,
+                    "upload_id": upload.id,
+                    "filename": original_filename,
+                    "size_bytes": len(data),
+                    "parser": parser,
+                },
+            )
             db.commit()
             db.refresh(doc)
             return self._document_to_dict(doc)
@@ -218,6 +275,16 @@ class DocumentService:
                 doc.status = "draft"
                 doc.updated_at = datetime.now(timezone.utc)
                 self._add_version(db, doc, scope["user_id"], payload.summary or "保存文档")
+                self._scan_document_for_sensitive(db, doc, scope["user_id"], "update")
+                self._add_operation_log(
+                    db,
+                    scope,
+                    "document.update",
+                    "document",
+                    doc.id,
+                    payload.summary or "更新文档",
+                    {"title": doc.title, "version": doc.version, "status": doc.status},
+                )
             db.commit()
             db.refresh(doc)
             return self._document_to_dict(doc)
@@ -231,6 +298,15 @@ class DocumentService:
 
             doc.status = "archived"
             doc.updated_at = datetime.now(timezone.utc)
+            self._add_operation_log(
+                db,
+                scope,
+                "document.archive",
+                "document",
+                doc.id,
+                "归档文档",
+                {"title": doc.title, "version": doc.version},
+            )
             db.commit()
             db.refresh(doc)
             return self._document_to_dict(doc)
@@ -244,6 +320,15 @@ class DocumentService:
 
             doc.status = "draft"
             doc.updated_at = datetime.now(timezone.utc)
+            self._add_operation_log(
+                db,
+                scope,
+                "document.restore",
+                "document",
+                doc.id,
+                "恢复文档",
+                {"title": doc.title, "version": doc.version},
+            )
             db.commit()
             db.refresh(doc)
             return self._document_to_dict(doc)
@@ -260,6 +345,13 @@ class DocumentService:
             if existing:
                 raise HTTPException(status_code=409, detail="该文档已有待审批记录")
 
+            agent_review = self.review_agent.review(
+                title=doc.title,
+                content=doc.content,
+                tags=json.loads(doc.tags_json or "[]"),
+                related_documents=self._review_related_documents(db, doc),
+            )
+            self._scan_document_for_sensitive(db, doc, scope["user_id"], "submit")
             doc.status = "reviewing"
             doc.updated_at = datetime.now(timezone.utc)
             approval = Approval(
@@ -268,8 +360,23 @@ class DocumentService:
                 submitter_id=scope["user_id"],
                 status="pending",
                 summary=payload.summary,
+                agent_review_json=json.dumps(agent_review, ensure_ascii=False),
             )
             db.add(approval)
+            self._add_operation_log(
+                db,
+                scope,
+                "approval.submit",
+                "approval",
+                approval.id,
+                "提交发布审批",
+                {
+                    "document_id": doc.id,
+                    "title": doc.title,
+                    "agent_risk_level": agent_review.get("risk_level"),
+                    "agent_finding_count": agent_review.get("finding_count"),
+                },
+            )
             try:
                 db.commit()
             except IntegrityError as exc:
@@ -331,6 +438,20 @@ class DocumentService:
                 approval.status = "rejected"
                 approval.document.status = "rejected"
             approval.document.updated_at = datetime.now(timezone.utc)
+            self._add_operation_log(
+                db,
+                scope,
+                "approval.review",
+                "approval",
+                approval.id,
+                "处理发布审批",
+                {
+                    "document_id": approval.document_id,
+                    "action": payload.action,
+                    "result": approval.status,
+                    "reason": payload.reason,
+                },
+            )
             db.commit()
             db.refresh(approval)
             return self._approval_to_dict(approval)
@@ -425,6 +546,15 @@ class DocumentService:
                 content=content,
             )
             db.add(comment)
+            self._add_operation_log(
+                db,
+                scope,
+                "comment.create",
+                "comment",
+                comment.id,
+                "添加协作评论",
+                {"document_id": doc.id, "title": doc.title},
+            )
             db.commit()
             db.refresh(comment)
             return self._comment_to_dict(comment)
@@ -491,6 +621,12 @@ class DocumentService:
                 .where(DocumentUpload.tenant_id == scope["tenant_id"])
                 .order_by(DocumentUpload.created_at.desc())
             ).all()
+            operation_log_total = db.scalar(
+                select(func.count()).select_from(OperationLog).where(OperationLog.tenant_id == scope["tenant_id"])
+            ) or 0
+            sensitive_scans = db.scalars(
+                select(SensitiveScan).where(SensitiveScan.tenant_id == scope["tenant_id"])
+            ).all()
 
             since = datetime.now(timezone.utc) - timedelta(days=7)
             status_counts = self._document_status_counts(documents)
@@ -510,6 +646,10 @@ class DocumentService:
                     "weekly_new_documents": len([doc for doc in documents if self._is_since(doc.created_at, since)]),
                     "weekly_uploads": len([upload for upload in uploads if self._is_since(upload.created_at, since)]),
                     "total_reads": sum(doc.reads for doc in documents),
+                    "operation_log_total": operation_log_total,
+                    "sensitive_risk_total": len(
+                        [scan for scan in sensitive_scans if scan.status == "needs_attention"]
+                    ),
                 },
                 "status_breakdown": [
                     {"status": status, "count": count}
@@ -603,6 +743,66 @@ class DocumentService:
             rows = db.scalars(statement.order_by(Approval.submitted_at.desc())).all()
             return [self._approval_to_dict(row) for row in rows]
 
+    def list_sensitive_scans(self, document_id: str, scope: dict[str, str]) -> list[dict]:
+        with SessionLocal() as db:
+            self._get_visible_document(db, document_id, scope)
+            rows = db.scalars(
+                select(SensitiveScan)
+                .options(joinedload(SensitiveScan.document), joinedload(SensitiveScan.scanner))
+                .where(SensitiveScan.document_id == document_id, SensitiveScan.tenant_id == scope["tenant_id"])
+                .order_by(SensitiveScan.created_at.desc())
+            ).all()
+            return [self._sensitive_scan_to_dict(row) for row in rows]
+
+    def run_sensitive_scan(self, document_id: str, scope: dict[str, str]) -> dict:
+        with SessionLocal() as db:
+            doc = self._get_visible_document(db, document_id, scope)
+            self._assert_can_edit(doc, scope)
+            scan = self._scan_document_for_sensitive(db, doc, scope["user_id"], "manual")
+            db.commit()
+            db.refresh(scan)
+            return self._sensitive_scan_to_dict(scan)
+
+    def admin_sensitive_scans(
+        self,
+        scope: dict[str, str],
+        risk_level: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        self._assert_admin(scope)
+        self._validate_status_filter(risk_level, SENSITIVE_RISK_LEVELS, "风险等级")
+        with SessionLocal() as db:
+            statement = (
+                select(SensitiveScan)
+                .options(joinedload(SensitiveScan.document), joinedload(SensitiveScan.scanner))
+                .where(SensitiveScan.tenant_id == scope["tenant_id"])
+            )
+            if risk_level and risk_level != "all":
+                statement = statement.where(SensitiveScan.risk_level == risk_level)
+            rows = db.scalars(statement.order_by(SensitiveScan.created_at.desc()).limit(self._safe_limit(limit))).all()
+            return [self._sensitive_scan_to_dict(row) for row in rows]
+
+    def admin_operation_logs(
+        self,
+        scope: dict[str, str],
+        action: str | None = None,
+        resource_type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        self._assert_admin(scope)
+        with SessionLocal() as db:
+            statement = (
+                select(OperationLog)
+                .options(joinedload(OperationLog.actor))
+                .where(OperationLog.tenant_id == scope["tenant_id"])
+            )
+            if action:
+                statement = statement.where(OperationLog.action == action)
+            if resource_type:
+                statement = statement.where(OperationLog.resource_type == resource_type)
+            rows = db.scalars(statement.order_by(OperationLog.created_at.desc()).limit(self._safe_limit(limit))).all()
+            return [self._operation_log_to_dict(row) for row in rows]
+
     def admin_update_user(self, user_id: str, payload, scope: dict[str, str]) -> dict:
         self._assert_admin(scope)
         with SessionLocal() as db:
@@ -613,6 +813,12 @@ class DocumentService:
             )
             if not user:
                 raise HTTPException(status_code=404, detail="用户不存在")
+
+            before = {
+                "name": user.name,
+                "role": user.role,
+                "department_id": user.department_id,
+            }
 
             if payload.department_id is not None:
                 department = db.get(Department, payload.department_id)
@@ -637,6 +843,22 @@ class DocumentService:
                         raise HTTPException(status_code=409, detail="至少保留一名管理员")
                 user.role = payload.role
 
+            self._add_operation_log(
+                db,
+                scope,
+                "admin.user.update",
+                "user",
+                user.id,
+                "更新用户资料或权限",
+                {
+                    "before": before,
+                    "after": {
+                        "name": user.name,
+                        "role": user.role,
+                        "department_id": user.department_id,
+                    },
+                },
+            )
             db.commit()
             db.refresh(user)
             documents = db.scalars(select(Document).where(Document.tenant_id == scope["tenant_id"])).all()
@@ -708,6 +930,20 @@ class DocumentService:
                     created_at=assistant_created_at,
                 )
             )
+            self._add_operation_log(
+                db,
+                scope,
+                "qa.ask",
+                "conversation",
+                session.id,
+                f"知识问答：{question.strip()[:80]}",
+                {
+                    "question_length": len(question),
+                    "answer_length": len(answer),
+                    "citation_count": len((meta or {}).get("citations", [])),
+                    "trace_id": (meta or {}).get("trace_id"),
+                },
+            )
             db.commit()
             db.refresh(session)
             return self._conversation_to_dict(session)
@@ -773,6 +1009,9 @@ class DocumentService:
         if status and status not in allowed:
             raise HTTPException(status_code=422, detail=f"{label}不支持")
 
+    def _safe_limit(self, limit: int) -> int:
+        return max(1, min(limit, 200))
+
     def _resolve_department_id(self, db, requested_department_id: str | None, scope: dict[str, str]) -> str:
         department_id = requested_department_id or scope["department_id"]
         department = db.get(Department, department_id)
@@ -795,8 +1034,104 @@ class DocumentService:
             )
         )
 
+    def _add_operation_log(
+        self,
+        db,
+        scope: dict[str, str],
+        action: str,
+        resource_type: str,
+        resource_id: str | None = None,
+        summary: str = "",
+        metadata: dict | None = None,
+    ) -> OperationLog:
+        log = OperationLog(
+            id=self._new_id("log"),
+            tenant_id=scope["tenant_id"],
+            actor_id=scope.get("user_id") or scope.get("id"),
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            summary=summary,
+            metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+        )
+        db.add(log)
+        return log
+
+    def _scan_document_for_sensitive(
+        self,
+        db,
+        doc: Document,
+        scanner_id: str | None,
+        trigger: str,
+    ) -> SensitiveScan:
+        findings = self._normalize_sensitive_findings(detect_sensitive_terms(doc.content))
+        finding_count = len(findings)
+        risk_level = self._sensitive_risk_level(findings)
+        status = "needs_attention" if finding_count else "passed"
+        suggestions = (
+            ["发布前请删除或脱敏敏感字段", "必要时降低可见范围并补充审批说明"]
+            if finding_count
+            else ["未发现内置规则命中的敏感信息，可进入后续协作流程"]
+        )
+        summary = f"发现 {finding_count} 项敏感信息，建议处理后再发布" if finding_count else "未发现敏感信息"
+        scan = SensitiveScan(
+            id=self._new_id("scan"),
+            tenant_id=doc.tenant_id,
+            document_id=doc.id,
+            scanner_id=scanner_id,
+            status=status,
+            risk_level=risk_level,
+            finding_count=finding_count,
+            findings_json=json.dumps(findings, ensure_ascii=False),
+            summary=summary,
+            suggestions_json=json.dumps(suggestions, ensure_ascii=False),
+        )
+        db.add(scan)
+        db.flush()
+        self._add_operation_log(
+            db,
+            {"tenant_id": doc.tenant_id, "user_id": scanner_id} if scanner_id else {"tenant_id": doc.tenant_id},
+            "sensitive.scan",
+            "document",
+            doc.id,
+            "执行敏感信息检测",
+            {
+                "scan_id": scan.id,
+                "trigger": trigger,
+                "risk_level": risk_level,
+                "finding_count": finding_count,
+            },
+        )
+        return scan
+
+    def _normalize_sensitive_findings(self, findings: list[dict]) -> list[dict]:
+        normalized = []
+        for item in findings:
+            rule_type = item.get("type", "keyword")
+            term = item.get("term", "敏感信息")
+            severity = "high" if rule_type == "pattern" else "medium"
+            normalized.append(
+                {
+                    "type": "sensitive",
+                    "rule_type": rule_type,
+                    "severity": severity,
+                    "term": term,
+                    "sample": item.get("sample"),
+                    "message": f"命中敏感信息规则：{term}",
+                }
+            )
+        return normalized
+
+    def _sensitive_risk_level(self, findings: list[dict]) -> str:
+        if not findings:
+            return "none"
+        if any(item.get("severity") == "high" for item in findings):
+            return "high"
+        return "medium"
+
     def _document_to_dict(self, doc: Document) -> dict:
         latest_upload = doc.uploads[0] if doc.uploads else None
+        latest_scan = doc.sensitive_scans[0] if doc.sensitive_scans else None
         return {
             "id": doc.id,
             "tenant_id": doc.tenant_id,
@@ -815,6 +1150,7 @@ class DocumentService:
             "reads": doc.reads,
             "content": doc.content,
             "source_upload": self._upload_to_dict(latest_upload) if latest_upload else None,
+            "sensitive_scan": self._sensitive_scan_to_dict(latest_scan) if latest_scan else None,
         }
 
     def _upload_to_dict(self, upload: DocumentUpload) -> dict:
@@ -830,6 +1166,44 @@ class DocumentService:
             "error": upload.error,
             "created_at": upload.created_at.isoformat(),
         }
+
+    def _sensitive_scan_to_dict(self, scan: SensitiveScan) -> dict:
+        return {
+            "id": scan.id,
+            "tenant_id": scan.tenant_id,
+            "document_id": scan.document_id,
+            "document_title": scan.document.title if scan.document else scan.document_id,
+            "scanner_id": scan.scanner_id,
+            "scanner": scan.scanner.name if scan.scanner else None,
+            "status": scan.status,
+            "risk_level": scan.risk_level,
+            "finding_count": scan.finding_count,
+            "findings": self._json_or(scan.findings_json, []),
+            "summary": scan.summary,
+            "suggestions": self._json_or(scan.suggestions_json, []),
+            "created_at": scan.created_at.isoformat(),
+        }
+
+    def _operation_log_to_dict(self, log: OperationLog) -> dict:
+        return {
+            "id": log.id,
+            "tenant_id": log.tenant_id,
+            "actor_id": log.actor_id,
+            "actor": log.actor.name if log.actor else None,
+            "actor_email": log.actor.email if log.actor else None,
+            "action": log.action,
+            "resource_type": log.resource_type,
+            "resource_id": log.resource_id,
+            "summary": log.summary,
+            "metadata": self._json_or(log.metadata_json, {}),
+            "created_at": log.created_at.isoformat(),
+        }
+
+    def _json_or(self, value: str | None, fallback):
+        try:
+            return json.loads(value or "")
+        except json.JSONDecodeError:
+            return fallback
 
     def _admin_user_to_dict(
         self,
@@ -895,6 +1269,28 @@ class DocumentService:
             counts[doc.status] = counts.get(doc.status, 0) + 1
         return counts
 
+    def _review_related_documents(self, db, doc: Document) -> list[dict]:
+        rows = db.scalars(
+            select(Document)
+            .where(
+                Document.tenant_id == doc.tenant_id,
+                Document.id != doc.id,
+                Document.status != "archived",
+            )
+            .order_by(Document.updated_at.desc())
+            .limit(20)
+        ).all()
+        return [
+            {
+                "id": row.id,
+                "title": row.title,
+                "content": row.content,
+                "status": row.status,
+                "department_id": row.department_id,
+            }
+            for row in rows
+        ]
+
     def _approval_to_dict(self, approval: Approval) -> dict:
         return {
             "id": approval.id,
@@ -904,6 +1300,7 @@ class DocumentService:
             "submitted_at": approval.submitted_at.isoformat(),
             "status": approval.status,
             "summary": approval.summary,
+            "agent_review": json.loads(approval.agent_review_json or "{}"),
             "reviewer": approval.reviewer.name if approval.reviewer else None,
             "reason": approval.reason,
             "reviewed_at": approval.reviewed_at.isoformat() if approval.reviewed_at else None,

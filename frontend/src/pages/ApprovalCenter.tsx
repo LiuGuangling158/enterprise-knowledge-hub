@@ -1,4 +1,4 @@
-import { Check, X } from "lucide-react";
+import { Check, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 import type { ApprovalItem } from "../types";
 
@@ -56,6 +56,7 @@ export function ApprovalCenter({
                 <strong>{item.title}</strong>
                 <span>{item.submitter} 提交于 {formatDate(item.submitted_at)}</span>
                 <p>{item.summary}</p>
+                <AgentReviewBlock item={item} />
                 <textarea
                   value={reasons[item.id] ?? ""}
                   onChange={(event) => setReasons((current) => ({ ...current, [item.id]: event.target.value }))}
@@ -90,6 +91,7 @@ export function ApprovalCenter({
                 <strong>{item.title}</strong>
                 <span>审批人 {item.reviewer ?? "未记录"}</span>
                 {item.reason ? <span>意见：{item.reason}</span> : null}
+                <AgentReviewBlock item={item} compact />
               </div>
               <span className={`status ${item.status}`}>{item.status === "approved" ? "已通过" : "已驳回"}</span>
             </article>
@@ -98,6 +100,40 @@ export function ApprovalCenter({
       </section>
     </section>
   );
+}
+
+function AgentReviewBlock({ item, compact = false }: { item: ApprovalItem; compact?: boolean }) {
+  const review = item.agent_review;
+  if (!review || !review.summary) return null;
+  return (
+    <div className={`agentReview ${review.risk_level}`}>
+      <div className="agentReviewHeader">
+        <ShieldAlert size={15} />
+        <strong>Agent 审核</strong>
+        <span className={`status ${review.status === "passed" ? "approved" : "pending"}`}>
+          {riskText(review.risk_level)}
+        </span>
+      </div>
+      <p>{review.summary}</p>
+      {!compact && review.findings?.length ? (
+        <div className="riskList">
+          {review.findings.slice(0, 4).map((finding, index) => (
+            <span key={`${finding.type}-${index}`}>{finding.message}</span>
+          ))}
+        </div>
+      ) : null}
+      {!compact && review.suggestions?.length ? <small>{review.suggestions[0]}</small> : null}
+    </div>
+  );
+}
+
+function riskText(risk: string) {
+  return {
+    none: "无风险",
+    low: "低风险",
+    medium: "中风险",
+    high: "高风险"
+  }[risk] ?? risk;
 }
 
 function formatDate(value: string) {

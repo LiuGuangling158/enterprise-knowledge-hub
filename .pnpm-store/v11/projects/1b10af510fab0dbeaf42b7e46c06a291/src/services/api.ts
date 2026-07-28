@@ -9,7 +9,9 @@ import type {
   DocumentVersion,
   KnowledgeDocument,
   MetricSnapshot,
+  OperationLog,
   SearchHit,
+  SensitiveScan,
   UserProfile,
   VersionCompareResult
 } from "../types";
@@ -135,6 +137,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ summary })
     }),
+  sensitiveScans: (id: string) => request<SensitiveScan[]>(`/api/documents/${id}/sensitive-scans`),
+  runSensitiveScan: (id: string) =>
+    request<SensitiveScan>(`/api/documents/${id}/sensitive-scan`, {
+      method: "POST"
+    }),
   versions: (id: string) => request<DocumentVersion[]>(`/api/documents/${id}/versions`),
   compareVersions: (id: string, left: number, right: number) =>
     request<VersionCompareResult>(
@@ -178,10 +185,26 @@ export const api = {
   },
   adminApprovals: (status?: string) =>
     request<ApprovalItem[]>(`/api/admin/approvals${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  adminOperationLogs: (filters: { action?: string; resourceType?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.action) params.set("action", filters.action);
+    if (filters.resourceType) params.set("resource_type", filters.resourceType);
+    if (filters.limit) params.set("limit", String(filters.limit));
+    const suffix = params.toString();
+    return request<OperationLog[]>(`/api/admin/operation-logs${suffix ? `?${suffix}` : ""}`);
+  },
+  adminSensitiveScans: (filters: { riskLevel?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.riskLevel) params.set("risk_level", filters.riskLevel);
+    if (filters.limit) params.set("limit", String(filters.limit));
+    const suffix = params.toString();
+    return request<SensitiveScan[]>(`/api/admin/sensitive-scans${suffix ? `?${suffix}` : ""}`);
+  },
   agentCapabilities: () => request<AgentCapabilities>("/api/agents/capabilities"),
   conversations: () => request<ConversationSession[]>("/api/conversations"),
   conversation: (sessionId: string) => request<ConversationSession>(`/api/conversations/${sessionId}`),
-  search: (query: string) => request<{ results: SearchHit[] }>(`/api/search?q=${encodeURIComponent(query)}`),
+  search: (query: string) =>
+    request<{ results: SearchHit[]; retrieval_meta?: Record<string, unknown> }>(`/api/search?q=${encodeURIComponent(query)}`),
   ask: async (
     sessionId: string,
     question: string,

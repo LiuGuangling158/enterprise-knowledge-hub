@@ -17,8 +17,8 @@ class KnowledgeOrchestrator:
         self.retrieval = RetrievalAgent(retriever)
         self.qa = QAAgent()
 
-    def search(self, query: str, scope: dict[str, str], top_k: int = 5) -> dict:
-        return self.retrieval.run(query, scope, top_k=top_k)
+    def search(self, query: str, scope: dict[str, str], top_k: int = 5, filters: dict | None = None) -> dict:
+        return self.retrieval.run(query, scope, top_k=top_k, filters=filters)
 
     def capabilities(self) -> dict:
         return {
@@ -49,7 +49,8 @@ class KnowledgeOrchestrator:
                 },
             ],
             "tools": [
-                {"id": "hybrid_search", "name": "混合检索", "type": "retrieval"},
+                {"id": "hybrid_search", "name": "分块混合检索", "type": "retrieval"},
+                {"id": "rrf_rerank", "name": "RRF 融合重排", "type": "reranker"},
                 {"id": "evidence_guard", "name": "证据置信度校验", "type": "guardrail"},
                 {"id": "conversation_store", "name": "对话记忆", "type": "memory"},
             ],
@@ -139,6 +140,7 @@ class KnowledgeOrchestrator:
                 "rewritten_query": result["rewritten_query"],
                 "hit_count": len(result["results"]),
                 "hits": self._summarize_hits(result["results"]),
+                "retrieval_meta": result.get("retrieval_meta", {}),
                 "output": self._retrieval_output(result),
             },
         )
@@ -149,7 +151,8 @@ class KnowledgeOrchestrator:
                 "agent_name": "Retrieval Agent",
                 "rewritten_query": result["rewritten_query"],
                 "hit_count": len(result["results"]),
-                "output": f"检索完成：Query 改写为“{result['rewritten_query']}”，召回 {len(result['results'])} 条候选证据。",
+                "retrieval_meta": result.get("retrieval_meta", {}),
+                "output": f"检索完成：Query 改写为“{result['rewritten_query']}”，召回 {len(result['results'])} 条融合排序后的候选证据。",
             },
         )
 
@@ -226,6 +229,7 @@ class KnowledgeOrchestrator:
             "citations": qa_result["citations"],
             "rewritten_query": result["rewritten_query"],
             "hit_count": len(result["results"]),
+            "retrieval_meta": result.get("retrieval_meta", {}),
             "agent_trace": trace_events,
             "run_summary": run_summary,
         }
@@ -325,6 +329,7 @@ class KnowledgeOrchestrator:
                 "version": hit["version"],
                 "section": hit["section"],
                 "score": hit["score"],
+                "strategy": hit.get("retrieval_strategy"),
                 "citation": hit["citation"],
                 "snippet": hit["snippet"],
             }
@@ -340,7 +345,11 @@ class KnowledgeOrchestrator:
             f"{hit['title']} v{hit['version']}（{hit['score']}）"
             for hit in hits[:3]
         )
-        return f"Query 改写为“{result['rewritten_query']}”，Top 命中：{top_hits}。"
+        meta = result.get("retrieval_meta", {})
+        return (
+            f"Query 改写为“{result['rewritten_query']}”，"
+            f"分块 {meta.get('chunk_count', 0)} 个，Top 命中：{top_hits}。"
+        )
 
     def _preview(self, text: str, limit: int = 80) -> str:
         clean = " ".join(text.split())

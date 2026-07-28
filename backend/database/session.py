@@ -45,8 +45,15 @@ def ensure_runtime_columns() -> None:
             columns = {row["name"] for row in rows}
             if "summary" not in columns:
                 connection.exec_driver_sql("ALTER TABLE documents ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
+            rows = connection.exec_driver_sql("PRAGMA table_info('approvals')").mappings().all()
+            columns = {row["name"] for row in rows}
+            if "agent_review_json" not in columns:
+                connection.exec_driver_sql("ALTER TABLE approvals ADD COLUMN agent_review_json TEXT NOT NULL DEFAULT '{}'")
         return
 
     if engine.dialect.name == "postgresql":
         with engine.begin() as connection:
             connection.exec_driver_sql("ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''")
+            connection.exec_driver_sql(
+                "ALTER TABLE approvals ADD COLUMN IF NOT EXISTS agent_review_json TEXT NOT NULL DEFAULT '{}'"
+            )

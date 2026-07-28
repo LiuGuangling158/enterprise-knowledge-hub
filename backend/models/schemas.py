@@ -93,10 +93,16 @@ class ConversationSessionOut(BaseModel):
 
 class SearchHit(BaseModel):
     document_id: str
+    chunk_id: str | None = None
+    chunk_index: int | None = None
     title: str
     section: str
     snippet: str
     score: float
+    rrf_score: float | None = None
+    raw_scores: dict | None = None
+    rank_sources: list[str] | None = None
+    retrieval_strategy: str | None = None
     citation: str
     version: int
     author: str
@@ -109,6 +115,7 @@ class SearchResponse(BaseModel):
     query: str
     rewritten_query: str
     results: list[SearchHit]
+    retrieval_meta: dict = Field(default_factory=dict)
 
 
 class VersionCompareResponse(BaseModel):

@@ -92,6 +92,10 @@ class Document(Base):
         back_populates="document",
         order_by="DocumentUpload.created_at.desc()",
     )
+    sensitive_scans: Mapped[list["SensitiveScan"]] = relationship(
+        back_populates="document",
+        order_by="SensitiveScan.created_at.desc()",
+    )
 
 
 class DocumentUpload(Base):
@@ -166,6 +170,7 @@ class Approval(Base):
     reviewer_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("users.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    agent_review_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -173,3 +178,47 @@ class Approval(Base):
     document: Mapped[Document] = relationship()
     submitter: Mapped[User] = relationship(foreign_keys=[submitter_id])
     reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewer_id])
+
+
+class OperationLog(Base):
+    __tablename__ = "operation_logs"
+    __table_args__ = (
+        Index("ix_operation_logs_tenant_created", "tenant_id", "created_at"),
+        Index("ix_operation_logs_action", "action"),
+        Index("ix_operation_logs_resource", "resource_type", "resource_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), ForeignKey("tenants.id"), nullable=False, index=True)
+    actor_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("users.id"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    resource_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+    actor: Mapped[User | None] = relationship()
+
+
+class SensitiveScan(Base):
+    __tablename__ = "sensitive_scans"
+    __table_args__ = (
+        Index("ix_sensitive_scans_document_created", "document_id", "created_at"),
+        Index("ix_sensitive_scans_tenant_risk", "tenant_id", "risk_level"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), ForeignKey("tenants.id"), nullable=False, index=True)
+    document_id: Mapped[str] = mapped_column(String(64), ForeignKey("documents.id"), nullable=False, index=True)
+    scanner_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("users.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="passed")
+    risk_level: Mapped[str] = mapped_column(String(40), nullable=False, default="none")
+    finding_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    findings_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    suggestions_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+    document: Mapped[Document] = relationship(back_populates="sensitive_scans")
+    scanner: Mapped[User | None] = relationship()

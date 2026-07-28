@@ -174,6 +174,8 @@ class V1FlowTest(unittest.TestCase):
         )
         self.assertEqual(submitted.status_code, 200, submitted.text)
         approval_id = submitted.json()["id"]
+        self.assertIn("agent_review", submitted.json())
+        self.assertEqual(submitted.json()["agent_review"]["agent"], "Review Agent")
 
         duplicate_submit = self.client.post(
             f"/api/documents/{document_id}/submit",
@@ -186,6 +188,7 @@ class V1FlowTest(unittest.TestCase):
         self.assertEqual(history.status_code, 200, history.text)
         self.assertEqual(history.json()[0]["id"], approval_id)
         self.assertEqual(history.json()[0]["status"], "pending")
+        self.assertIn("summary", history.json()[0]["agent_review"])
 
         reviewed = self.client.post(
             f"/api/approvals/{approval_id}/review",
@@ -351,6 +354,69 @@ class V1FlowTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422, response.text)
 
+    def test_chunked_hybrid_search_returns_rrf_metadata(self) -> None:
+        headers = self.login("admin@example.com")
+        suffix = uuid4().hex[:8]
+        content = "# 第一节\n" + ("流程说明" * 180) + f"\n# 第二节\n唯一检索信号 ABC{suffix} 用于验证分块召回。"
+        created = self.client.post(
+            "/api/documents",
+            headers=headers,
+            json={
+                "title": f"RAG chunk doc {suffix}",
+                "content": content,
+                "tags": ["rag-upgrade"],
+                "visibility": "public",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+
+        search = self.client.get(
+            "/api/search",
+            headers=headers,
+            params={"q": f"ABC{suffix}", "status": "draft", "tag": "rag-upgrade"},
+        )
+        self.assertEqual(search.status_code, 200, search.text)
+        payload = search.json()
+        self.assertEqual(payload["retrieval_meta"]["strategy"], "chunked_hybrid_rrf")
+        self.assertGreaterEqual(payload["retrieval_meta"]["chunk_count"], 2)
+        self.assertGreaterEqual(len(payload["results"]), 1)
+        hit = payload["results"][0]
+        self.assertIn("chunk-", hit["citation"])
+        self.assertIn("chunk_id", hit)
+        self.assertEqual(hit["retrieval_strategy"], "chunked_hybrid_rrf")
+        self.assertIn("raw_scores", hit)
+        self.assertIn("ABC", hit["snippet"])
+
+    def test_submit_document_persists_agent_review_risks(self) -> None:
+        headers = self.login("admin@example.com")
+        suffix = uuid4().hex[:8]
+        created = self.client.post(
+            "/api/documents",
+            headers=headers,
+            json={
+                "title": f"敏感审核文档 {suffix}",
+                "content": "这是一份发布前审核文档，包含手机号 13812345678 和 api_key=secret-token-12345，需要 Agent 审核提示。",
+                "tags": ["审核"],
+                "visibility": "public",
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+
+        submitted = self.client.post(
+            f"/api/documents/{created.json()['id']}/submit",
+            headers=headers,
+            json={"summary": "提交敏感信息审核"},
+        )
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        review = submitted.json()["agent_review"]
+        self.assertEqual(review["status"], "needs_attention")
+        self.assertEqual(review["risk_level"], "high")
+        self.assertTrue(any(item["type"] == "sensitive" for item in review["findings"]))
+
+        history = self.client.get(f"/api/documents/{created.json()['id']}/approvals", headers=headers)
+        self.assertEqual(history.status_code, 200, history.text)
+        self.assertEqual(history.json()[0]["agent_review"]["risk_level"], "high")
+
     def test_qa_conversation_history_is_persisted_per_user(self) -> None:
         headers = self.login("product@example.com")
         session_id = f"qa-test-{uuid4().hex[:8]}"
@@ -377,6 +443,7 @@ class V1FlowTest(unittest.TestCase):
         self.assertTrue(messages[1]["content"])
         self.assertIn("trace_id", messages[1]["meta"])
         self.assertIn("agent_trace", messages[1]["meta"])
+        self.assertEqual(messages[1]["meta"]["retrieval_meta"]["strategy"], "chunked_hybrid_rrf")
         self.assertGreaterEqual(len(messages[1]["meta"]["agent_trace"]), 4)
         self.assertEqual(messages[1]["meta"]["run_summary"]["question"], question)
         trace_outputs = [
@@ -396,6 +463,8 @@ class V1FlowTest(unittest.TestCase):
         search = self.client.get("/api/search", headers=headers, params={"q": "检索架构"})
         self.assertEqual(search.status_code, 200, search.text)
         self.assertIn("source", search.json()["results"][0])
+        self.assertIn("retrieval_meta", search.json())
+        self.assertEqual(search.json()["results"][0]["retrieval_strategy"], "chunked_hybrid_rrf")
 
         capabilities = self.client.get("/api/agents/capabilities", headers=headers)
         self.assertEqual(capabilities.status_code, 200, capabilities.text)

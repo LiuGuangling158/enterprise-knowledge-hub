@@ -30,6 +30,7 @@ export interface KnowledgeDocument {
   reads: number;
   content: string;
   source_upload?: DocumentUploadMetadata | null;
+  sensitive_scan?: SensitiveScan | null;
 }
 
 export interface DocumentUploadMetadata {
@@ -53,9 +54,32 @@ export interface ApprovalItem {
   submitted_at: string;
   status: "pending" | "approved" | "rejected";
   summary: string;
+  agent_review?: AgentReview | null;
   reviewer?: string | null;
   reason?: string | null;
   reviewed_at?: string | null;
+}
+
+export interface AgentReview {
+  agent: string;
+  status: "passed" | "needs_attention" | string;
+  risk_level: "none" | "low" | "medium" | "high" | string;
+  finding_count: number;
+  findings: AgentReviewFinding[];
+  summary: string;
+  suggestions: string[];
+  checked_at: string;
+}
+
+export interface AgentReviewFinding {
+  type: "format" | "sensitive" | "duplicate" | string;
+  severity: "low" | "medium" | "high" | string;
+  message: string;
+  term?: string;
+  sample?: string;
+  document_id?: string;
+  title?: string;
+  overlap?: number;
 }
 
 export interface DocumentVersion {
@@ -161,6 +185,36 @@ export interface AdminUpload extends DocumentUploadMetadata {
   uploader: string;
 }
 
+export interface SensitiveScan {
+  id: string;
+  tenant_id: string;
+  document_id: string;
+  document_title: string;
+  scanner_id?: string | null;
+  scanner?: string | null;
+  status: "passed" | "needs_attention" | string;
+  risk_level: "none" | "low" | "medium" | "high" | string;
+  finding_count: number;
+  findings: AgentReviewFinding[];
+  summary: string;
+  suggestions: string[];
+  created_at: string;
+}
+
+export interface OperationLog {
+  id: string;
+  tenant_id: string;
+  actor_id?: string | null;
+  actor?: string | null;
+  actor_email?: string | null;
+  action: string;
+  resource_type: string;
+  resource_id?: string | null;
+  summary: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface AdminOverview {
   metrics: {
     user_total: number;
@@ -173,6 +227,8 @@ export interface AdminOverview {
     weekly_new_documents: number;
     weekly_uploads: number;
     total_reads: number;
+    operation_log_total: number;
+    sensitive_risk_total: number;
   };
   status_breakdown: Array<{ status: DocumentStatus; count: number }>;
   department_breakdown: AdminDepartment[];
@@ -183,10 +239,16 @@ export interface AdminOverview {
 
 export interface SearchHit {
   document_id: string;
+  chunk_id?: string;
+  chunk_index?: number;
   title: string;
   section: string;
   snippet: string;
   score: number;
+  rrf_score?: number;
+  raw_scores?: Record<string, number>;
+  rank_sources?: string[];
+  retrieval_strategy?: string;
   citation: string;
   version: number;
   author: string;

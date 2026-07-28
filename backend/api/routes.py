@@ -38,6 +38,14 @@ async def login(payload: LoginRequest) -> TokenResponse:
     user = documents.authenticate_user(payload.email, payload.password)
     if not user:
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
+    documents.record_operation(
+        user,
+        "auth.login",
+        "user",
+        user["id"],
+        "用户登录",
+        {"email": payload.email},
+    )
     return TokenResponse(access_token=create_access_token(user["id"]), user=UserOut(**user))
 
 
@@ -110,6 +118,16 @@ async def restore_document(document_id: str, user: CurrentUser) -> dict:
 @router.post("/documents/{document_id}/submit")
 async def submit_document(document_id: str, payload: SubmitRequest, user: CurrentUser) -> dict:
     return documents.submit_document(document_id, payload, user)
+
+
+@router.get("/documents/{document_id}/sensitive-scans")
+async def list_sensitive_scans(document_id: str, user: CurrentUser) -> list[dict]:
+    return documents.list_sensitive_scans(document_id, user)
+
+
+@router.post("/documents/{document_id}/sensitive-scan")
+async def run_sensitive_scan(document_id: str, user: CurrentUser) -> dict:
+    return documents.run_sensitive_scan(document_id, user)
 
 
 @router.get("/documents/{document_id}/versions/compare", response_model=VersionCompareResponse)
@@ -191,6 +209,25 @@ async def admin_approvals(user: CurrentUser, status: str | None = None) -> list[
     return documents.admin_approvals(user, status=status)
 
 
+@router.get("/admin/operation-logs")
+async def admin_operation_logs(
+    user: CurrentUser,
+    action: str | None = None,
+    resource_type: str | None = None,
+    limit: int = Query(default=100, ge=1, le=200),
+) -> list[dict]:
+    return documents.admin_operation_logs(user, action=action, resource_type=resource_type, limit=limit)
+
+
+@router.get("/admin/sensitive-scans")
+async def admin_sensitive_scans(
+    user: CurrentUser,
+    risk_level: str | None = None,
+    limit: int = Query(default=100, ge=1, le=200),
+) -> list[dict]:
+    return documents.admin_sensitive_scans(user, risk_level=risk_level, limit=limit)
+
+
 @router.get("/conversations", response_model=list[ConversationSessionOut])
 async def list_conversations(user: CurrentUser) -> list[dict]:
     return documents.list_conversations(user)
@@ -211,9 +248,19 @@ async def search(
     user: CurrentUser,
     q: str = Query(..., min_length=1),
     top_k: int = Query(default=5, ge=1, le=20),
+    status: str | None = None,
+    department_id: str | None = None,
+    tag: str | None = None,
 ) -> SearchResponse:
-    results = orchestrator.search(q, user, top_k=top_k)
-    return SearchResponse(query=q, rewritten_query=results["rewritten_query"], results=results["results"])
+    filters = {"status": status, "department_id": department_id, "tag": tag}
+    filters = {key: value for key, value in filters.items() if value}
+    results = orchestrator.search(q, user, top_k=top_k, filters=filters)
+    return SearchResponse(
+        query=q,
+        rewritten_query=results["rewritten_query"],
+        results=results["results"],
+        retrieval_meta=results.get("retrieval_meta", {}),
+    )
 
 
 @router.post("/ask")

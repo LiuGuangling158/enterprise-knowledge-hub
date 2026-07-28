@@ -393,6 +393,9 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
                     <span className={`status ${approval.status}`}>{approvalStatusText(approval.status)}</span>
                   </div>
                   <p>{approval.summary || "无摘要"}</p>
+                  {approval.agent_review?.summary ? (
+                    <small>Agent 审核：{riskText(approval.agent_review.risk_level)} · {approval.agent_review.summary}</small>
+                  ) : null}
                   <small>
                     {approval.submitter} · {formatDate(approval.submitted_at)}
                   </small>
@@ -518,6 +521,15 @@ function parserText(parser: string) {
     markdown: "Markdown 解析",
     plain_text: "文本解析"
   }[parser] ?? parser;
+}
+
+function riskText(risk: string) {
+  return {
+    none: "无风险",
+    low: "低风险",
+    medium: "中风险",
+    high: "高风险"
+  }[risk] ?? risk;
 }
 
 function formatBytes(bytes: number) {

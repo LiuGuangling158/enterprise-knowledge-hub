@@ -6,6 +6,8 @@ import {
   FileText,
   RefreshCcw,
   Save,
+  ScrollText,
+  ShieldAlert,
   ShieldCheck,
   UploadCloud,
   UserCog,
@@ -13,9 +15,18 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../services/api";
-import type { AdminDepartment, AdminOverview, AdminUser, ApprovalItem, KnowledgeDocument, UserProfile } from "../types";
+import type {
+  AdminDepartment,
+  AdminOverview,
+  AdminUser,
+  ApprovalItem,
+  KnowledgeDocument,
+  OperationLog,
+  SensitiveScan,
+  UserProfile
+} from "../types";
 
-type AdminTab = "overview" | "users" | "departments" | "documents" | "approvals";
+type AdminTab = "overview" | "users" | "departments" | "documents" | "approvals" | "logs" | "sensitive";
 
 const emptyOverview: AdminOverview = {
   metrics: {
@@ -28,7 +39,9 @@ const emptyOverview: AdminOverview = {
     archived_documents: 0,
     weekly_new_documents: 0,
     weekly_uploads: 0,
-    total_reads: 0
+    total_reads: 0,
+    operation_log_total: 0,
+    sensitive_risk_total: 0
   },
   status_breakdown: [],
   department_breakdown: [],
@@ -51,6 +64,8 @@ export function AdminDashboard({ currentUser, query, onOpenDocument, onDataChang
   const [departments, setDepartments] = useState<AdminDepartment[]>([]);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
+  const [operationLogs, setOperationLogs] = useState<OperationLog[]>([]);
+  const [sensitiveScans, setSensitiveScans] = useState<SensitiveScan[]>([]);
   const [documentStatus, setDocumentStatus] = useState("all");
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [loading, setLoading] = useState(false);
@@ -62,18 +77,22 @@ export function AdminDashboard({ currentUser, query, onOpenDocument, onDataChang
     setLoading(true);
     setMessage("");
     try {
-      const [overviewRows, userRows, departmentRows, documentRows, approvalRows] = await Promise.all([
+      const [overviewRows, userRows, departmentRows, documentRows, approvalRows, logRows, scanRows] = await Promise.all([
         api.adminOverview(),
         api.adminUsers(),
         api.adminDepartments(),
         api.adminDocuments(),
-        api.adminApprovals()
+        api.adminApprovals(),
+        api.adminOperationLogs({ limit: 100 }),
+        api.adminSensitiveScans({ limit: 100 })
       ]);
       setOverview(overviewRows);
       setUsers(userRows);
       setDepartments(departmentRows);
       setDocuments(documentRows);
       setApprovals(approvalRows);
+      setOperationLogs(logRows);
+      setSensitiveScans(scanRows);
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : "管理后台加载失败");
     } finally {
@@ -110,6 +129,24 @@ export function AdminDashboard({ currentUser, query, onOpenDocument, onDataChang
         `${item.title} ${item.submitter} ${item.status} ${item.summary}`.toLowerCase().includes(normalizedQuery)
       ),
     [approvals, normalizedQuery]
+  );
+  const filteredLogs = useMemo(
+    () =>
+      operationLogs.filter((item) =>
+        `${item.actor ?? ""} ${item.actor_email ?? ""} ${item.action} ${item.resource_type} ${item.summary}`
+          .toLowerCase()
+          .includes(normalizedQuery)
+      ),
+    [normalizedQuery, operationLogs]
+  );
+  const filteredSensitiveScans = useMemo(
+    () =>
+      sensitiveScans.filter((item) =>
+        `${item.document_title} ${item.scanner ?? ""} ${item.risk_level} ${item.summary}`
+          .toLowerCase()
+          .includes(normalizedQuery)
+      ),
+    [normalizedQuery, sensitiveScans]
   );
 
   if (currentUser.role !== "admin") {
@@ -200,7 +237,9 @@ export function AdminDashboard({ currentUser, query, onOpenDocument, onDataChang
           ["users", "用户"],
           ["departments", "部门"],
           ["documents", "文档"],
-          ["approvals", "审批"]
+          ["approvals", "审批"],
+          ["logs", "日志"],
+          ["sensitive", "敏感"]
         ].map(([key, label]) => (
           <button key={key} className={tab === key ? "selected" : ""} onClick={() => setTab(key as AdminTab)}>
             {label}
@@ -367,6 +406,11 @@ export function AdminDashboard({ currentUser, query, onOpenDocument, onDataChang
                   <strong>{item.title}</strong>
                   <span>{item.submitter} · {formatDate(item.submitted_at)}</span>
                   <p>{item.summary || "无摘要"}</p>
+                  {item.agent_review?.summary ? (
+                    <div className={`agentReview compact ${item.agent_review.risk_level}`}>
+                      <span>Agent 审核：{riskText(item.agent_review.risk_level)} · {item.agent_review.summary}</span>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="recordActions">
                   <span className={`status ${item.status}`}>{approvalStatusText(item.status)}</span>
@@ -385,6 +429,68 @@ export function AdminDashboard({ currentUser, query, onOpenDocument, onDataChang
               </article>
             ))}
             {!filteredApprovals.length ? <p className="emptyText">暂无匹配审批</p> : null}
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "logs" ? (
+        <section className="panelBlock">
+          <div className="sectionHeader">
+            <h2>操作日志</h2>
+            <span>{filteredLogs.length} 条</span>
+          </div>
+          <div className="adminList">
+            {filteredLogs.map((item) => (
+              <article className="adminRecord" key={item.id}>
+                <div>
+                  <strong>{actionText(item.action)}</strong>
+                  <span>{item.actor ?? "系统"} · {formatDate(item.created_at)}</span>
+                  <p>{item.summary || "无摘要"}</p>
+                  <small className="metadataLine">{resourceText(item.resource_type)}：{item.resource_id ?? "-"}</small>
+                </div>
+                <div className="recordActions">
+                  <span className="status draft">{item.action}</span>
+                </div>
+              </article>
+            ))}
+            {!filteredLogs.length ? <p className="emptyText">暂无匹配日志</p> : null}
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "sensitive" ? (
+        <section className="panelBlock">
+          <div className="sectionHeader">
+            <h2>敏感检测</h2>
+            <span>{filteredSensitiveScans.length} 条</span>
+          </div>
+          <div className="adminList">
+            {filteredSensitiveScans.map((item) => (
+              <article className="adminRecord" key={item.id}>
+                <div>
+                  <strong>{item.document_title}</strong>
+                  <span>{item.scanner ?? "系统"} · {formatDate(item.created_at)}</span>
+                  <p>{item.summary}</p>
+                  {item.findings.length ? (
+                    <div className="riskList compactRiskList">
+                      {item.findings.slice(0, 4).map((finding, index) => (
+                        <span key={`${item.id}-${index}`}>{finding.term ?? finding.message}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="recordActions">
+                  <span className={`status ${item.status === "needs_attention" ? "rejected" : "approved"}`}>
+                    {riskText(item.risk_level)} · {item.finding_count} 项
+                  </span>
+                  <button className="secondaryAction" onClick={() => onOpenDocument(item.document_id)}>
+                    <FileText size={15} />
+                    <span>打开</span>
+                  </button>
+                </div>
+              </article>
+            ))}
+            {!filteredSensitiveScans.length ? <p className="emptyText">暂无匹配检测记录</p> : null}
           </div>
         </section>
       ) : null}
@@ -484,6 +590,15 @@ function approvalStatusText(status: ApprovalItem["status"]) {
     approved: "已通过",
     rejected: "已驳回"
   }[status];
+}
+
+function riskText(risk: string) {
+  return {
+    none: "无风险",
+    low: "低风险",
+    medium: "中风险",
+    high: "高风险"
+  }[risk] ?? risk;
 }
 
 function formatBytes(bytes: number) {

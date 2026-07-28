@@ -75,9 +75,36 @@ CREATE TABLE IF NOT EXISTS approvals (
   reviewer_id VARCHAR(64) REFERENCES users(id),
   status VARCHAR(40) NOT NULL DEFAULT 'pending',
   summary TEXT NOT NULL DEFAULT '',
+  agent_review_json TEXT NOT NULL DEFAULT '{}',
   reason TEXT,
   submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   reviewed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS operation_logs (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL REFERENCES tenants(id),
+  actor_id VARCHAR(64) REFERENCES users(id),
+  action VARCHAR(80) NOT NULL,
+  resource_type VARCHAR(40) NOT NULL,
+  resource_id VARCHAR(80),
+  summary TEXT NOT NULL DEFAULT '',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sensitive_scans (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL REFERENCES tenants(id),
+  document_id VARCHAR(64) NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  scanner_id VARCHAR(64) REFERENCES users(id),
+  status VARCHAR(40) NOT NULL DEFAULT 'passed',
+  risk_level VARCHAR(40) NOT NULL DEFAULT 'none',
+  finding_count INTEGER NOT NULL DEFAULT 0,
+  findings_json TEXT NOT NULL DEFAULT '[]',
+  summary TEXT NOT NULL DEFAULT '',
+  suggestions_json TEXT NOT NULL DEFAULT '[]',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS document_acl (
@@ -104,3 +131,8 @@ CREATE INDEX IF NOT EXISTS idx_documents_status ON documents (status);
 CREATE INDEX IF NOT EXISTS idx_document_uploads_document_id ON document_uploads (document_id);
 CREATE INDEX IF NOT EXISTS idx_document_uploads_tenant_created ON document_uploads (tenant_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals (status);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_tenant_created ON operation_logs (tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_action ON operation_logs (action);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_resource ON operation_logs (resource_type, resource_id);
+CREATE INDEX IF NOT EXISTS idx_sensitive_scans_document_created ON sensitive_scans (document_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sensitive_scans_tenant_risk ON sensitive_scans (tenant_id, risk_level);
