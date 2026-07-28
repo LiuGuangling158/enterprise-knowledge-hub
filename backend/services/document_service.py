@@ -1,6 +1,8 @@
 import json
+import re
 from difflib import unified_diff
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -17,10 +19,14 @@ from database.models import (
     Department,
     Document,
     DocumentComment,
+    DocumentUpload,
     DocumentVersion,
     User,
 )
 from database.session import SessionLocal
+
+
+SUPPORTED_UPLOAD_SUFFIXES = {".md": "markdown", ".markdown": "markdown", ".txt": "plain_text"}
 
 
 class DocumentService:
@@ -101,6 +107,77 @@ class DocumentService:
             db.add(doc)
             db.flush()
             self._add_version(db, doc, scope["user_id"], "创建文档")
+            db.commit()
+            db.refresh(doc)
+            return self._document_to_dict(doc)
+
+    def upload_document(
+        self,
+        *,
+        filename: str,
+        content_type: str | None,
+        data: bytes,
+        visibility: str,
+        tags: str,
+        department_id: str | None,
+        scope: dict[str, str],
+    ) -> dict:
+        if visibility not in {"department", "public"}:
+            raise HTTPException(status_code=422, detail="可见范围只能是 department 或 public")
+        if not data:
+            raise HTTPException(status_code=400, detail="上传文件不能为空")
+        if len(data) > settings.max_upload_bytes:
+            raise HTTPException(status_code=413, detail="上传文件超过大小限制")
+
+        original_filename = self._sanitize_filename(filename)
+        suffix = Path(original_filename).suffix.lower()
+        parser = SUPPORTED_UPLOAD_SUFFIXES.get(suffix)
+        if not parser:
+            raise HTTPException(status_code=415, detail="当前仅支持 Markdown 和文本文件上传")
+
+        content = self._decode_uploaded_text(data)
+        title = Path(original_filename).stem.strip() or "未命名上传文档"
+        parsed_tags = self._parse_upload_tags(tags)
+
+        with SessionLocal() as db:
+            resolved_department_id = self._resolve_department_id(db, department_id, scope)
+            doc = Document(
+                id=self._new_id("doc"),
+                tenant_id=scope["tenant_id"],
+                department_id=resolved_department_id,
+                title=title[:240],
+                content=content,
+                summary=self._summarize_document(title, content),
+                author_id=scope["user_id"],
+                status="draft",
+                visibility=visibility,
+                version=1,
+                tags_json=json.dumps(parsed_tags, ensure_ascii=False),
+            )
+            db.add(doc)
+            db.flush()
+
+            stored_path = self._store_upload_file(
+                tenant_id=scope["tenant_id"],
+                document_id=doc.id,
+                original_filename=original_filename,
+                data=data,
+            )
+            upload = DocumentUpload(
+                id=self._new_id("upl"),
+                document_id=doc.id,
+                tenant_id=scope["tenant_id"],
+                department_id=resolved_department_id,
+                uploader_id=scope["user_id"],
+                original_filename=original_filename,
+                stored_path=stored_path,
+                content_type=content_type or "application/octet-stream",
+                size_bytes=len(data),
+                parser=parser,
+                status="parsed",
+            )
+            db.add(upload)
+            self._add_version(db, doc, scope["user_id"], f"上传解析：{original_filename}")
             db.commit()
             db.refresh(doc)
             return self._document_to_dict(doc)
@@ -510,6 +587,7 @@ class DocumentService:
         )
 
     def _document_to_dict(self, doc: Document) -> dict:
+        latest_upload = doc.uploads[0] if doc.uploads else None
         return {
             "id": doc.id,
             "tenant_id": doc.tenant_id,
@@ -527,6 +605,21 @@ class DocumentService:
             "summary": doc.summary or self._summarize_document(doc.title, doc.content),
             "reads": doc.reads,
             "content": doc.content,
+            "source_upload": self._upload_to_dict(latest_upload) if latest_upload else None,
+        }
+
+    def _upload_to_dict(self, upload: DocumentUpload) -> dict:
+        return {
+            "id": upload.id,
+            "document_id": upload.document_id,
+            "original_filename": upload.original_filename,
+            "stored_path": upload.stored_path,
+            "content_type": upload.content_type,
+            "size_bytes": upload.size_bytes,
+            "parser": upload.parser,
+            "status": upload.status,
+            "error": upload.error,
+            "created_at": upload.created_at.isoformat(),
         }
 
     def _approval_to_dict(self, approval: Approval) -> dict:
@@ -620,3 +713,51 @@ class DocumentService:
         if len(excerpt) > 160:
             excerpt = f"{excerpt[:157].rstrip()}..."
         return f"{title}：{excerpt}"[:220]
+
+    def _decode_uploaded_text(self, data: bytes) -> str:
+        for encoding in ["utf-8-sig", "utf-8", "gb18030"]:
+            try:
+                content = data.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            raise HTTPException(status_code=415, detail="文件编码无法解析，请上传 UTF-8 或 GB18030 文本")
+
+        if not content.strip():
+            raise HTTPException(status_code=400, detail="上传文件没有可解析正文")
+        return content
+
+    def _parse_upload_tags(self, tags: str) -> list[str]:
+        if not tags:
+            return []
+        return [tag.strip() for tag in re.split(r"[,，]", tags) if tag.strip()]
+
+    def _sanitize_filename(self, filename: str) -> str:
+        normalized = filename.replace("\\", "/").split("/")[-1].strip()
+        normalized = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", normalized)
+        if not normalized:
+            return "upload.txt"
+        if len(normalized) <= 240:
+            return normalized
+
+        suffix = Path(normalized).suffix
+        stem = Path(normalized).stem[: max(1, 240 - len(suffix))]
+        return f"{stem}{suffix}"
+
+    def _store_upload_file(self, *, tenant_id: str, document_id: str, original_filename: str, data: bytes) -> str:
+        root = self._upload_root()
+        relative_dir = Path(tenant_id) / document_id
+        target_dir = root / relative_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        stored_name = f"{uuid4().hex[:12]}-{original_filename}"
+        target_path = target_dir / stored_name
+        target_path.write_bytes(data)
+        return (relative_dir / stored_name).as_posix()
+
+    def _upload_root(self) -> Path:
+        root = Path(settings.upload_dir)
+        if root.is_absolute():
+            return root
+        return Path(__file__).resolve().parents[1] / root

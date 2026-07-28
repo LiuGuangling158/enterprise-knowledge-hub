@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./knowledge_v1.db"
     jwt_secret: str = "change-me"
     access_token_expire_minutes: int = 60 * 8
+    upload_dir: str = "uploads"
+    max_upload_bytes: int = 5 * 1024 * 1024
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",

@@ -1,15 +1,20 @@
 import os
+import shutil
 import unittest
 from pathlib import Path
 from uuid import uuid4
 
 
 TEST_DB = Path(__file__).resolve().parents[1] / "test_knowledge_v1.db"
+TEST_UPLOAD_DIR = Path(__file__).resolve().parents[1] / "test-uploads"
 if TEST_DB.exists():
     TEST_DB.unlink()
+if TEST_UPLOAD_DIR.exists():
+    shutil.rmtree(TEST_UPLOAD_DIR)
 
 os.environ["APP_ENV"] = "test"
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB.as_posix()}"
+os.environ["UPLOAD_DIR"] = str(TEST_UPLOAD_DIR)
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
@@ -30,6 +35,8 @@ class V1FlowTest(unittest.TestCase):
         engine.dispose()
         if TEST_DB.exists():
             TEST_DB.unlink()
+        if TEST_UPLOAD_DIR.exists():
+            shutil.rmtree(TEST_UPLOAD_DIR)
 
     def login(self, email: str) -> dict[str, str]:
         response = self.client.post(
@@ -144,6 +151,56 @@ class V1FlowTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403, response.text)
 
+    def test_text_upload_creates_document_and_source_record(self) -> None:
+        headers = self.login("product@example.com")
+        suffix = uuid4().hex[:8]
+        filename = f"upload-flow-{suffix}.md"
+        content = "# 上传闭环\n\n这是一份通过真实上传接口进入知识库的文档。"
+
+        response = self.client.post(
+            "/api/documents/upload",
+            headers={**headers, "Content-Type": "text/markdown"},
+            params={"filename": filename, "visibility": "department", "tags": "上传,测试"},
+            content=content.encode("utf-8"),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        document = response.json()
+        self.assertEqual(document["title"], f"upload-flow-{suffix}")
+        self.assertEqual(document["content"], content)
+        self.assertEqual(document["status"], "draft")
+        self.assertEqual(document["tags"], ["上传", "测试"])
+        self.assertIn("上传闭环", document["summary"])
+
+        source_upload = document["source_upload"]
+        self.assertEqual(source_upload["original_filename"], filename)
+        self.assertEqual(source_upload["parser"], "markdown")
+        self.assertEqual(source_upload["size_bytes"], len(content.encode("utf-8")))
+        self.assertTrue((TEST_UPLOAD_DIR / source_upload["stored_path"]).exists())
+
+        versions = self.client.get(f"/api/documents/{document['id']}/versions", headers=headers)
+        self.assertEqual(versions.status_code, 200, versions.text)
+        self.assertEqual(versions.json()[0]["summary"], f"上传解析：{filename}")
+
+        search = self.client.get("/api/search", headers=headers, params={"q": "上传闭环"})
+        self.assertEqual(search.status_code, 200, search.text)
+        self.assertIn(document["id"], [item["document_id"] for item in search.json()["results"]])
+
+        blocked = self.client.post(
+            "/api/documents/upload",
+            headers={**headers, "Content-Type": "text/plain"},
+            params={"filename": "blocked.txt", "visibility": "department", "department_id": "dept-tech"},
+            content="不能上传到其他部门".encode("utf-8"),
+        )
+        self.assertEqual(blocked.status_code, 403, blocked.text)
+
+        unsupported = self.client.post(
+            "/api/documents/upload",
+            headers={**headers, "Content-Type": "application/pdf"},
+            params={"filename": "blocked.pdf", "visibility": "department"},
+            content=b"%PDF-1.7",
+        )
+        self.assertEqual(unsupported.status_code, 415, unsupported.text)
+
     def test_archive_hides_document_until_restored(self) -> None:
         headers = self.login("admin@example.com")
         suffix = uuid4().hex[:8]
@@ -244,6 +301,8 @@ class V1FlowTest(unittest.TestCase):
         self.assertIn("agent_plan", response.text)
         self.assertIn("tool_result", response.text)
         self.assertIn("guardrail_result", response.text)
+        self.assertIn("output", response.text)
+        self.assertIn(question, response.text)
         self.assertIn("conversation_saved", response.text)
 
         conversation = self.client.get(f"/api/conversations/{session_id}", headers=headers)
@@ -255,6 +314,13 @@ class V1FlowTest(unittest.TestCase):
         self.assertIn("trace_id", messages[1]["meta"])
         self.assertIn("agent_trace", messages[1]["meta"])
         self.assertGreaterEqual(len(messages[1]["meta"]["agent_trace"]), 4)
+        self.assertEqual(messages[1]["meta"]["run_summary"]["question"], question)
+        trace_outputs = [
+            item.get("output", "")
+            for item in messages[1]["meta"]["agent_trace"]
+            if isinstance(item, dict)
+        ]
+        self.assertTrue(any(question[:8] in output for output in trace_outputs))
         citations = messages[1]["meta"]["citations"]
         self.assertGreaterEqual(len(citations), 1)
         self.assertIn("document_id", citations[0])

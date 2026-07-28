@@ -1061,19 +1061,31 @@ button {
   line-height: 1.45;
 }
 
-.traceHitList {
+.traceHitList,
+.tracePlanList {
   display: grid;
   gap: 4px;
   margin-top: 7px;
 }
 
-.traceHitList span {
+.traceHitList span,
+.tracePlanList span {
   padding: 5px 7px;
   border-radius: 8px;
   background: #f2f6fb;
   color: #475467;
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.tracePlanList span {
+  background: #eef6f5;
+  color: #1f6b67;
+}
+
+.traceAnswerPreview {
+  border-left: 3px solid #65a9a6;
+  padding-left: 8px;
 }
 
 .trace {

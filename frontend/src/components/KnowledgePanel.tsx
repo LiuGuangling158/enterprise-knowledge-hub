@@ -26,13 +26,19 @@ interface AgentTraceEvent extends Record<string, unknown> {
   agent?: string;
   agent_name?: string;
   objective?: string;
+  output?: string;
   tool?: string;
   intent?: string;
+  reason?: string;
+  strategy?: string;
   confidence?: string | number;
   hit_count?: number;
   citation_count?: number;
   rewritten_query?: string;
   hits?: Array<Record<string, unknown>>;
+  steps?: Array<Record<string, unknown>>;
+  support_points?: string[];
+  answer_preview?: string;
 }
 
 const welcomeMessage: Message = {
@@ -86,6 +92,15 @@ function messageFromHistory(message: ConversationMessage): Message {
   };
 }
 
+function traceFromHistory(messages: ConversationMessage[]): AgentTraceEvent[] {
+  const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+  const agentTrace = latestAssistant?.meta.agent_trace;
+  if (!Array.isArray(agentTrace)) return [];
+  return agentTrace
+    .filter((item): item is AgentTraceEvent => Boolean(item) && typeof item === "object" && "event" in item)
+    .map((item) => item as AgentTraceEvent);
+}
+
 function iconForTrace(item: AgentTraceEvent) {
   if (item.event === "tool_call" || item.event === "tool_result") return Wrench;
   if (item.event === "agent_plan") return GitBranch;
@@ -110,6 +125,7 @@ function traceTitle(item: AgentTraceEvent) {
 }
 
 function traceDescription(item: AgentTraceEvent) {
+  if (item.output) return item.output;
   if (item.objective) return String(item.objective);
   if (item.event === "agent_plan" && Array.isArray(item.steps)) return `计划 ${item.steps.length} 个执行步骤`;
   if (item.event === "tool_call") return `工具：${item.tool || "unknown"}`;
@@ -145,6 +161,7 @@ export function KnowledgePanel({ open, onClose, userId }: { open: boolean; onClo
         if (cancelled) return;
         const history = conversation.messages.map(messageFromHistory);
         setMessages(history.length ? history : [welcomeMessage]);
+        setTrace(traceFromHistory(conversation.messages));
       })
       .catch(() => {
         if (!cancelled) setMessages((current) => (current.length ? current : [welcomeMessage]));
@@ -252,6 +269,15 @@ export function KnowledgePanel({ open, onClose, userId }: { open: boolean; onClo
                     <div>
                       <strong>{traceTitle(item)}</strong>
                       {traceDescription(item) ? <p>{traceDescription(item)}</p> : null}
+                      {item.event === "agent_plan" && Array.isArray(item.steps) && item.steps.length ? (
+                        <div className="tracePlanList">
+                          {item.steps.map((step, stepIndex) => (
+                            <span key={`${String(step.agent)}-${stepIndex}`}>
+                              {String(step.agent_name || step.agent)}：{String(step.objective || step.output || "等待执行")}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       {item.event === "tool_result" && Array.isArray(item.hits) && item.hits.length ? (
                         <div className="traceHitList">
                           {item.hits.slice(0, 3).map((hit) => (
@@ -259,6 +285,14 @@ export function KnowledgePanel({ open, onClose, userId }: { open: boolean; onClo
                           ))}
                         </div>
                       ) : null}
+                      {Array.isArray(item.support_points) && item.support_points.length ? (
+                        <div className="traceHitList">
+                          {item.support_points.slice(0, 3).map((point) => (
+                            <span key={point}>{point}</span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {item.answer_preview ? <p className="traceAnswerPreview">{item.answer_preview}</p> : null}
                     </div>
                   </article>
                 );

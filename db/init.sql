@@ -35,9 +35,26 @@ CREATE TABLE IF NOT EXISTS documents (
   visibility VARCHAR(40) NOT NULL DEFAULT 'department',
   version INTEGER NOT NULL DEFAULT 1,
   tags_json TEXT NOT NULL DEFAULT '[]',
+  summary TEXT NOT NULL DEFAULT '',
   reads INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS document_uploads (
+  id VARCHAR(64) PRIMARY KEY,
+  document_id VARCHAR(64) NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  tenant_id VARCHAR(64) NOT NULL REFERENCES tenants(id),
+  department_id VARCHAR(64) NOT NULL REFERENCES departments(id),
+  uploader_id VARCHAR(64) NOT NULL REFERENCES users(id),
+  original_filename VARCHAR(240) NOT NULL,
+  stored_path VARCHAR(500) NOT NULL,
+  content_type VARCHAR(120) NOT NULL DEFAULT 'application/octet-stream',
+  size_bytes INTEGER NOT NULL,
+  parser VARCHAR(80) NOT NULL,
+  status VARCHAR(40) NOT NULL DEFAULT 'parsed',
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS document_versions (
@@ -84,4 +101,6 @@ CREATE TABLE IF NOT EXISTS agent_traces (
 
 CREATE INDEX IF NOT EXISTS idx_documents_tenant_department ON documents (tenant_id, department_id);
 CREATE INDEX IF NOT EXISTS idx_documents_status ON documents (status);
+CREATE INDEX IF NOT EXISTS idx_document_uploads_document_id ON document_uploads (document_id);
+CREATE INDEX IF NOT EXISTS idx_document_uploads_tenant_created ON document_uploads (tenant_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals (status);

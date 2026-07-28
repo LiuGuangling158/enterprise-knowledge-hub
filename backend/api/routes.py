@@ -1,6 +1,6 @@
 import json
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from agents.orchestrator import KnowledgeOrchestrator
@@ -63,6 +63,27 @@ async def list_documents(
 @router.post("/documents")
 async def create_document(payload: DocumentCreate, user: CurrentUser) -> dict:
     return documents.create_document(payload, user)
+
+
+@router.post("/documents/upload")
+async def upload_document(
+    request: Request,
+    user: CurrentUser,
+    filename: str = Query(..., min_length=1, max_length=240),
+    visibility: str = Query(default="department"),
+    tags: str = Query(default=""),
+    department_id: str | None = Query(default=None),
+    file: bytes = Body(..., media_type="application/octet-stream"),
+) -> dict:
+    return documents.upload_document(
+        filename=filename,
+        content_type=request.headers.get("content-type"),
+        data=file,
+        visibility=visibility,
+        tags=tags,
+        department_id=department_id,
+        scope=user,
+    )
 
 
 @router.get("/documents/{document_id}")

@@ -88,6 +88,36 @@ class Document(Base):
 
     author: Mapped[User] = relationship()
     department: Mapped[Department] = relationship()
+    uploads: Mapped[list["DocumentUpload"]] = relationship(
+        back_populates="document",
+        order_by="DocumentUpload.created_at.desc()",
+    )
+
+
+class DocumentUpload(Base):
+    __tablename__ = "document_uploads"
+    __table_args__ = (
+        Index("ix_document_uploads_document_id", "document_id"),
+        Index("ix_document_uploads_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(64), ForeignKey("documents.id"), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(64), ForeignKey("tenants.id"), nullable=False)
+    department_id: Mapped[str] = mapped_column(String(64), ForeignKey("departments.id"), nullable=False)
+    uploader_id: Mapped[str] = mapped_column(String(64), ForeignKey("users.id"), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(240), nullable=False)
+    stored_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False, default="application/octet-stream")
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    parser: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="parsed")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+    document: Mapped[Document] = relationship(back_populates="uploads")
+    department: Mapped[Department] = relationship()
+    uploader: Mapped[User] = relationship()
 
 
 class DocumentVersion(Base):

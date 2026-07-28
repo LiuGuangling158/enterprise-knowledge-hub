@@ -29,6 +29,20 @@ export interface KnowledgeDocument {
   summary: string;
   reads: number;
   content: string;
+  source_upload?: DocumentUploadMetadata | null;
+}
+
+export interface DocumentUploadMetadata {
+  id: string;
+  document_id: string;
+  original_filename: string;
+  stored_path: string;
+  content_type: string;
+  size_bytes: number;
+  parser: string;
+  status: "parsed" | "failed" | string;
+  error?: string | null;
+  created_at: string;
 }
 
 export interface ApprovalItem {

@@ -16,3 +16,5 @@ chroma-data/
 minio-data/
 postgres-data/
 redis-data/
+backend/uploads/
+backend/test-uploads/

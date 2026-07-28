@@ -240,14 +240,40 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
     }
   }
 
-  function loadFile(event: ChangeEvent<HTMLInputElement>) {
+  async function uploadFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    file.text().then((text) => {
-      setContent(text);
-      if (!title) setTitle(file.name.replace(/\.(md|markdown|txt)$/i, ""));
-      setSummary("上传解析文档");
-    });
+
+    setSaving(true);
+    setMessage("");
+    try {
+      const uploaded = await api.uploadDocument(file, { visibility, tags: parsedTags });
+      setDocument(uploaded);
+      setTitle(uploaded.title);
+      setTags(uploaded.tags.join(", "));
+      setVisibility(uploaded.visibility);
+      setContent(uploaded.content);
+      setSummary("更新文档内容");
+      setMode("edit");
+      const [versionRows, approvalRows, commentRows] = await Promise.all([
+        api.versions(uploaded.id),
+        api.documentApprovals(uploaded.id),
+        api.comments(uploaded.id)
+      ]);
+      setVersions(versionRows);
+      syncCompareSelection(versionRows, uploaded.version);
+      setApprovalHistory(approvalRows);
+      setComments(commentRows);
+      setVersionCompare(null);
+      setCommentText("");
+      setMessage("文件已上传并解析为在线文档");
+      onSaved(uploaded);
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "上传解析失败");
+    } finally {
+      setSaving(false);
+      event.target.value = "";
+    }
   }
 
   return (
@@ -265,8 +291,8 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
           </button>
           <label className="secondaryAction uploadButton">
             <FileUp size={16} />
-            <span>上传解析</span>
-            <input type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" onChange={loadFile} />
+            <span>上传新文档</span>
+            <input type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" onChange={uploadFile} disabled={saving} />
           </label>
           <button className="secondaryAction" onClick={() => setMode(mode === "edit" ? "preview" : "edit")}>
             {mode === "edit" ? <Eye size={16} /> : <SquarePen size={16} />}
@@ -345,6 +371,14 @@ export function DocumentEditor({ documentId, onBack, onSaved, onArchived, onRest
             <p>版本：v{document?.version ?? 1}</p>
             <p>阅读：{document?.reads ?? 0}</p>
           </div>
+          {document?.source_upload ? (
+            <div className="sideBlock">
+              <h2>上传来源</h2>
+              <p>{document.source_upload.original_filename}</p>
+              <p>{formatBytes(document.source_upload.size_bytes)} · {parserText(document.source_upload.parser)}</p>
+              <small>{formatDate(document.source_upload.created_at)}</small>
+            </div>
+          ) : null}
           <div className="sideBlock">
             <h2>自动摘要</h2>
             <p>{document?.summary || "保存后自动生成摘要"}</p>
@@ -477,6 +511,19 @@ function approvalStatusText(status: ApprovalItem["status"]) {
     approved: "已通过",
     rejected: "已驳回"
   }[status];
+}
+
+function parserText(parser: string) {
+  return {
+    markdown: "Markdown 解析",
+    plain_text: "文本解析"
+  }[parser] ?? parser;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function formatDate(value: string) {

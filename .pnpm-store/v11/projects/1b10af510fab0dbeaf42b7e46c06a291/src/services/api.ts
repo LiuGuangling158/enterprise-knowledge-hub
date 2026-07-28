@@ -75,6 +75,36 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload)
     }),
+  uploadDocument: async (
+    file: File,
+    options: {
+      visibility: "department" | "public";
+      tags: string[];
+      departmentId?: string | null;
+    }
+  ) => {
+    const params = new URLSearchParams({
+      filename: file.name,
+      visibility: options.visibility,
+      tags: options.tags.join(",")
+    });
+    if (options.departmentId) params.set("department_id", options.departmentId);
+
+    const response = await fetch(`${API_BASE_URL}/api/documents/upload?${params.toString()}`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(),
+        "Content-Type": file.type || "application/octet-stream"
+      },
+      body: file
+    });
+    if (!response.ok) {
+      if (response.status === 401) api.clearToken();
+      const detail = await response.json().catch(() => null);
+      throw new Error(detail?.detail ?? `Request failed: ${response.status}`);
+    }
+    return response.json() as Promise<KnowledgeDocument>;
+  },
   updateDocument: (
     id: string,
     payload: {
